@@ -134,7 +134,7 @@ fun OutlookScreen(
                         Text("Nothing to plan right now", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Cards appear here in season: outdoor activities, trail mud, your garden, clothes drying, heating and fall foliage. " +
-                                "Turn them on in Settings › Outlook." + if (state.liteMode && !settings.showStaleData) " On satellite, cards with data over 12 hours old are hidden." else "",
+                                "Turn them on in Settings › Outlook." + if (state.liteMode && !settings.showStaleData) " In Backwoods mode, cards with data over 12 hours old are hidden." else "",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

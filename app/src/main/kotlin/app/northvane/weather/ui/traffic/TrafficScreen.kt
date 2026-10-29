@@ -138,7 +138,7 @@ fun TrafficScreen(state: MainUiState, container: AppContainer, onOpenSettings: (
                 location == null -> Centered("Add a location on the Today tab to see traffic.")
                 paused && cachedOk && traffic.snapshot != null -> Column(Modifier.fillMaxSize()) {
                     Text(
-                        "Saved ${app.northvane.weather.ui.TimeFormat.ago(traffic.snapshot!!.fetchedAt)}. Traffic isn't downloaded on satellite.",
+                        "Saved ${app.northvane.weather.ui.TimeFormat.ago(traffic.snapshot!!.fetchedAt)}. Traffic isn't downloaded in Backwoods mode.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 16.dp),
@@ -152,16 +152,16 @@ fun TrafficScreen(state: MainUiState, container: AppContainer, onOpenSettings: (
                 ) {
                     Icon(NorthvaneIcons.Satellite, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(56.dp))
                     Spacer(Modifier.height(16.dp))
-                    Text("Traffic paused on satellite", style = MaterialTheme.typography.titleLarge)
+                    Text("Traffic is packed away in Backwoods mode", style = MaterialTheme.typography.titleLarge)
                     Text(
-                        "State work-zone feeds can be several hundred KB, so traffic is off in your satellite settings.",
+                        "State work-zone feeds can be several hundred KB, so traffic is off in Backwoods mode.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
                     )
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = { loadAnyway = true }) { Text("Load traffic anyway") }
-                    TextButton(onClick = onOpenSettings) { Text("Satellite settings") }
+                    TextButton(onClick = onOpenSettings) { Text("Backwoods mode settings") }
                 }
                 else -> {
                     val events = traffic.snapshot?.events.orEmpty()

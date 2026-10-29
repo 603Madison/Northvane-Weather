@@ -1,31 +1,32 @@
 # Northvane
 
 [![CI](https://github.com/603Madison/Northvane-Weather/actions/workflows/ci.yml/badge.svg)](https://github.com/603Madison/Northvane-Weather/actions/workflows/ci.yml)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 
 A clean, private weather app for Android.
 
 Northvane shows current conditions, hourly and 10-day forecasts, animated radar
 with a future cast, and National Weather Service alerts. It uses free NOAA/NWS
 data, can take current conditions from **your own WeeWX station**, and keeps
-working over **satellite links such as T-Mobile T-Satellite**. No API key is
+working over **satellite links such as T-Mobile T-Satellite** in **Backwoods mode**. No API key is
 built into the app, and there are no accounts, ads or analytics.
 
 | | |
 |---|---|
 | **Forecast numbers** | Hourly and daily wind, gusts, rain/snow/ice amounts, humidity, cloud cover, thunder chance (NWS gridpoint data) |
-| **Power outage outlook** | Optional daily estimate tuned for New England (gusts + leaf-on season, ice, wet snow, saturated ground, alerts) |
+| **Power outage outlook** | Optional (off by default) daily estimate tuned for New England (gusts + leaf-on season, ice, wet snow, saturated ground, alerts) |
 | **Current conditions** | Your WeeWX station → nearest NWS observation → OpenWeatherMap (optional) → NWS hourly estimate |
 | **Hourly / daily forecast** | NWS (api.weather.gov) → OpenWeatherMap (optional, e.g. outside the US) |
 | **Alerts & notifications** | NWS active alerts for every saved location, checked in the background |
 | **Radar** | NOAA MRMS (official) or NEXRAD composite, plus NOAA HRRR model future cast |
-| **Satellite** | Opts in to Android 16 constrained satellite networks; automatic data-saver mode |
+| **Backwoods mode** | Opts in to Android 16 constrained satellite networks and limits downloads to what you allow |
 | **Look & feel** | Material 3, light/dark/system theme, optional wallpaper colors, °F/°C |
 
 <p>
 <img src="docs/screenshots/today_ai_summary.png" width="200" alt="AI summary on Today">
 <img src="docs/screenshots/today_canada.png" width="200" alt="Fredericton, NB from Environment Canada">
 <img src="docs/screenshots/outlook_tab.png" width="200" alt="Outlook tab">
-<img src="docs/screenshots/settings_satellite.png" width="200" alt="Satellite settings">
+<img src="docs/screenshots/settings_satellite.png" width="200" alt="Backwoods mode settings">
 </p>
 <p>
 <img src="docs/screenshots/today_light.png" width="200" alt="Today, Portland ME">
@@ -51,7 +52,7 @@ built into the app, and there are no accounts, ads or analytics.
 </p>
 <p>
 <img src="docs/screenshots/alerts_dark.png" width="200" alt="NWS alerts">
-<img src="docs/screenshots/today_satellite_metric.png" width="200" alt="Satellite mode, metric">
+<img src="docs/screenshots/today_satellite_metric.png" width="200" alt="Backwoods mode, metric">
 </p>
 
 *Screenshots are rendered from real NWS and NOAA ACIS responses for Portland, ME by `ScreenshotTest` (the outage example adds a synthetic nor'easter day; the warning, pollen and nickname examples use sample data).*
@@ -292,7 +293,11 @@ shifts from icy blue to summer amber. **Custom** lets you pick an accent color
 and a gradient, or your own photo with adjustable dimming. The photo is
 re-encoded into app storage with its location metadata removed.
 
-### Satellite connectivity (T-Satellite and similar)
+### Backwoods mode (T-Satellite and similar)
+Backwoods mode is Northvane's light-packing mode. It turns on automatically
+on a satellite connection (or always or never, as you choose) and only
+downloads what you allow.
+
 - The manifest declares
   `android.telephony.PROPERTY_SATELLITE_DATA_OPTIMIZED`, so on Android 16+ the
   app is allowed onto constrained satellite networks and is listed among
@@ -301,7 +306,7 @@ re-encoded into app storage with its location metadata removed.
   *without* `NET_CAPABILITY_NOT_BANDWIDTH_CONSTRAINED` and treats it as
   constrained if that capability is missing or the transport is
   `TRANSPORT_SATELLITE`.
-- **You choose what goes over satellite** (Settings › Satellite & data saver),
+- **You choose what Backwoods mode downloads** (Settings › Backwoods mode),
   with typical sizes shown for each item: alerts, background alert checks,
   current conditions, WeeWX station (internet-reachable), daily forecast,
   forecast details, hourly forecast, recent weather history, pollen, radar,
@@ -371,7 +376,7 @@ docs/   Security and privacy notes.
   - *OpenWeatherMap*: enable/disable and enter your API key. The key is stored
     encrypted and never shown again.
 - **Settings › Severe weather alerts**: categories, check frequency, channels.
-- **Settings › Satellite & data saver**: when limits apply, and a checkbox per data type.
+- **Settings › Backwoods mode**: when it turns on, show stale data, and what it may download (grouped).
 - **Settings › Forecast extras**: power outage outlook, outdoor activities
   (and which ones), trail mud, fall foliage, pollen. Each is a separate switch.
 - **Settings › Radar**: past-radar source, future cast on/off and range,
@@ -401,3 +406,17 @@ docs/   Security and privacy notes.
 - Activity, mud, foliage and outage outlooks are Northvane's own estimates.
 
 See [`docs/SECURITY.md`](docs/SECURITY.md) for the security and privacy design, [`SECURITY.md`](SECURITY.md) for reporting vulnerabilities, [`CHANGELOG.md`](CHANGELOG.md) for release notes and [`docs/RELEASING.md`](docs/RELEASING.md) for how releases are made.
+
+## License
+
+Northvane is free software: you can redistribute it and/or modify it under
+the terms of the **GNU General Public License** as published by the Free
+Software Foundation, either **version 3** of the License, or (at your option)
+any later version. It is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE. See [`LICENSE`](LICENSE) for the full text.
+
+Copyright © 2026 Northvane contributors. SPDX-License-Identifier: `GPL-3.0-or-later`.
+
+Weather data and map tiles remain under their providers' own terms (see
+*Data sources and attribution* above).

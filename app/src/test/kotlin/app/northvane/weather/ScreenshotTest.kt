@@ -159,6 +159,7 @@ class ScreenshotTest {
         settings: AppSettings = AppSettings(
             units = UnitSystem.IMPERIAL,
             pollenEnabled = true,
+            outageRiskEnabled = true,
             allergies = mapOf(Allergen.BIRCH to Sensitivity.SEVERE, Allergen.GRASS to Sensitivity.MILD, Allergen.MOLD to Sensitivity.MODERATE),
             gardenEnabled = true,
             gardenPlan = listOf(

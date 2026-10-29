@@ -84,7 +84,7 @@ enum class SettingsPage(val route: String, val title: String) {
     OUTLOOK("outlook", "Outlook"),
     ALERTS("alerts", "Alerts & notifications"),
     MAPS("maps", "Radar & traffic"),
-    SATELLITE("satellite", "Satellite & data saver"),
+    SATELLITE("satellite", "Backwoods mode"),
     AI("ai", "AI summary"),
     ABOUT("about", "About & privacy"),
 }
@@ -149,10 +149,10 @@ private fun SettingsIndex(state: MainUiState, onBack: () -> Unit, nav: SettingsN
             NavRow("Radar & traffic", "${s.radarSource.label} · traffic tab ${onOff(s.trafficEnabled)}") { nav.openPage(SettingsPage.MAPS) }
         }
         SectionCard(null) {
-            NavRow("Satellite & data saver", when (s.dataSaver) {
-                DataSaverMode.AUTO -> "Limits on satellite connections"
-                DataSaverMode.ALWAYS -> "Limits always on"
-                DataSaverMode.OFF -> "Limits off"
+            NavRow("Backwoods mode", when (s.dataSaver) {
+                DataSaverMode.AUTO -> "Turns on by itself on satellite connections"
+                DataSaverMode.ALWAYS -> "Always on"
+                DataSaverMode.OFF -> "Off"
             } + if (s.showStaleData) " · showing stale data" else "") { nav.openPage(SettingsPage.SATELLITE) }
             NavRow("Data sources & API keys", "NWS, Environment Canada, WeeWX, pollen, air quality, traffic, OpenWeatherMap", nav.openSources)
             NavRow("AI summary", if (s.aiEnabled) "${s.aiProvider.label} · ${s.aiModel.ifBlank { "no model" }}" else "Off") { nav.openPage(SettingsPage.AI) }
@@ -389,25 +389,25 @@ private fun SatellitePage(state: MainUiState, container: AppContainer, onBack: (
     val s = state.settings
     val update = rememberUpdater(container)
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
-    SettingsScaffold("Satellite & data saver", onBack) {
+    SettingsScaffold("Backwoods mode", onBack) {
         SectionCard(null) {
             Hint(
-                "Choose what Northvane may download over satellite connections such as T-Mobile T-Satellite. " +
-                    "Anything you turn off keeps its last downloaded data.",
+                "Backwoods mode is Northvane's light-packing mode for satellite connections such as T-Mobile T-Satellite: " +
+                    "choose exactly what it may download. Anything you turn off keeps its last downloaded data.",
             )
-            ChoiceDropdown("Apply these limits", DataSaverMode.entries, s.dataSaver, {
+            ChoiceDropdown("Backwoods mode turns on", DataSaverMode.entries, s.dataSaver, {
                 when (it) {
-                    DataSaverMode.AUTO -> "On satellite connections"
+                    DataSaverMode.AUTO -> "Automatically on satellite connections"
                     DataSaverMode.ALWAYS -> "Always"
                     DataSaverMode.OFF -> "Never"
                 }
             }, { mode -> update { setDataSaver(mode) } })
             LabeledSwitch(
                 "Show stale data", s.showStaleData, { on -> update { setShowStaleData(on) } },
-                subtitle = "While limits are on, cards (and tabs) with data over 12 hours old are hidden. Turn this on to show them anyway.",
+                subtitle = "In Backwoods mode, cards (and tabs) with data over 12 hours old are hidden. Turn this on to show them anyway.",
             )
         }
-        SectionCard("Allowed over satellite") {
+        SectionCard("Allowed in Backwoods mode") {
             SatelliteGroup.entries.forEach { group ->
                 val on = group.features.count { it in s.satelliteFeatures }
                 val toggle = when (on) {
@@ -450,7 +450,7 @@ private fun SatellitePage(state: MainUiState, container: AppContainer, onBack: (
                 network.constrained -> "bandwidth-limited"
                 network.metered -> "mobile data"
                 else -> "unmetered"
-            } + (if (state.liteMode) " · limits active" else "") + ". Over satellite, a WeeWX or AI server is only reachable at a public address.",
+            } + (if (state.liteMode) " · Backwoods mode is on" else "") + ". Over satellite, a WeeWX or AI server is only reachable at a public address.",
         )
     }
 }
@@ -460,6 +460,10 @@ private fun AboutPage(onBack: () -> Unit) {
     SettingsScaffold("About & privacy", onBack) {
         SectionCard(null) {
             Text("Northvane ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyLarge)
+            Hint(
+                "Free software under the GNU General Public License v3.0 or later. You can use, study, share and change it; " +
+                    "it comes with no warranty. Source code: github.com/603Madison/Northvane-Weather",
+            )
             Hint(
                 "No accounts, ads, analytics or trackers. Your locations, settings and keys stay on this device and are excluded from " +
                     "backups. Weather requests send rounded coordinates (about 11 m) only to the services you use: weather.gov, " +

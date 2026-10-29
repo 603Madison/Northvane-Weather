@@ -3,6 +3,13 @@
 All notable changes to Northvane. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] - 2026-10-29
+
+### Changed
+- Satellite data saver is now called **Backwoods mode**.
+- The power outage outlook is off by default (turn it on in Settings › Today screen).
+- Northvane is now open source under the **GNU GPL v3.0 or later**.
+
 ## [1.4.0] - 2026-10-29
 
 ### Added

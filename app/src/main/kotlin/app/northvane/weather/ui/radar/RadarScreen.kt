@@ -357,17 +357,17 @@ private fun SatellitePaused(onLoadAnyway: () -> Unit, onOpenSettings: () -> Unit
             modifier = Modifier.size(56.dp),
         )
         Spacer(Modifier.height(16.dp))
-        Text("Radar paused on satellite", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
+        Text("Radar is packed away in Backwoods mode", style = MaterialTheme.typography.titleLarge, textAlign = TextAlign.Center)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Radar maps download many images, so radar is off in your satellite settings. You can load it once now, or allow it permanently.",
+            "Radar maps download many images, so they're off in Backwoods mode. You can load them once now, or allow them in Backwoods mode settings.",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(24.dp))
         Button(onClick = onLoadAnyway) { Text("Load radar anyway") }
-        TextButton(onClick = onOpenSettings) { Text("Satellite settings") }
+        TextButton(onClick = onOpenSettings) { Text("Backwoods mode settings") }
     }
 }
 

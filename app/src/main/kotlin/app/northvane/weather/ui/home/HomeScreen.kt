@@ -327,8 +327,8 @@ private fun HomeContent(
                         if (hidden.isNotEmpty()) {
                             item {
                                 HintText(
-                                    "Hidden on satellite because the data is over 12 hours old: ${hidden.joinToString(", ")}. " +
-                                        "Turn on Settings › Satellite & data saver › Show stale data to see it anyway.",
+                                    "Hidden in Backwoods mode because the data is over 12 hours old: ${hidden.joinToString(", ")}. " +
+                                        "Turn on Settings › Backwoods mode › Show stale data to see it anyway.",
                                 )
                             }
                         }
@@ -718,16 +718,16 @@ private fun DataSaverBanner(forced: Boolean, satellite: Boolean, allowed: Set<Sa
             Spacer(Modifier.width(12.dp))
             Column {
                 Text(
-                    if (forced) "Satellite limits are on" else if (satellite) "Satellite connection" else "Limited connection",
+                    if (forced) "Backwoods mode is on" else if (satellite) "Backwoods mode: satellite connection" else "Backwoods mode: limited connection",
                     style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,
                 )
                 Text(
                     if (paused.isEmpty()) {
-                        "Everything is allowed over satellite (Settings › Satellite)."
+                        "Everything is allowed (Settings › Backwoods mode)."
                     } else {
                         "Paused to save data: " + paused.joinToString(", ") { it.title.lowercase() } +
-                            ". Change in Settings › Satellite."
+                            ". Change in Settings › Backwoods mode."
                     },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSecondaryContainer,

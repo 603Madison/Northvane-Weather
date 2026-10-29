@@ -83,7 +83,7 @@ data class AppSettings(
     val owmEnabled: Boolean = false,
     val notificationPromptShown: Boolean = false,
     val satelliteFeatures: Set<SatelliteFeature> = SatelliteFeature.DEFAULTS,
-    val outageRiskEnabled: Boolean = true,
+    val outageRiskEnabled: Boolean = false,
     val pollenEnabled: Boolean = false,
     val activitiesEnabled: Boolean = true,
     val activities: Set<Activity> = Activity.entries.toSet(),

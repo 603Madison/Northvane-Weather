@@ -25,6 +25,12 @@ You need JDK 17+ (21 works), Android Studio with AGP 9.4 support and the Android
 - **Tests:** parsers should be covered by captured real responses (see `core/src/test/resources/live`). Don't commit responses containing personal locations; trim them to what's needed.
 - **Network:** built-in services are HTTPS-only. User-configured hosts must go through `UrlPolicy` and `CleartextGuardInterceptor`. Never send credentials over HTTP.
 - **Secrets:** nothing sensitive in code, logs or fixtures. API keys belong in `SecretStore`.
-- **Satellite:** new network features need a `SatelliteFeature` entry and an honest size estimate.
+- **Backwoods mode:** new network features need a `SatelliteFeature` entry and an honest size estimate.
 - **Outage outlook:** changes to thresholds in `OutageEstimator` should come with a test and the reasoning (storm, ice index, etc.).
 - Run lint and the tests before opening a PR.
+
+## License
+
+Northvane is licensed under the GNU General Public License v3.0 or later
+(`GPL-3.0-or-later`; see [`LICENSE`](LICENSE)). By contributing, you agree that
+your contributions are licensed under the same terms.
