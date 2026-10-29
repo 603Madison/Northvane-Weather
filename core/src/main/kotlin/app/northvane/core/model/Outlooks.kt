@@ -106,6 +106,8 @@ data class MudOutlook(
     /** True during spring thaw, when frozen subsoil keeps water at the surface (mud season). */
     val mudSeason: Boolean = false,
     val reasons: List<MudReason> = emptyList(),
+    /** Modeled snow depth on the ground, mm (seeded from the nearest snow report). */
+    val snowDepthMm: Double? = null,
 )
 
 // --- Activities ---
@@ -117,6 +119,13 @@ enum class Activity(val label: String, val overnight: Boolean = false) {
     OFF_ROADING("Off-roading"),
     MOUNTAIN_BIKING("Mountain biking"),
     PADDLING("Paddling"),
+    SWIMMING("Swimming"),
+    HUNTING("Hunting"),
+    SKIING("Downhill skiing"),
+    XC_SKIING("Cross-country skiing"),
+    SNOWSHOEING("Snowshoeing"),
+    SNOWMOBILING("Snowmobiling"),
+    ICE_FISHING("Ice fishing"),
     STARGAZING("Stargazing", overnight = true),
 }
 
@@ -152,6 +161,10 @@ data class Tip(val kind: Kind, val value: Double? = null) {
         CONDENSATION, FROST, SUMMIT_WIND, EARLY_START, MICROSPIKES, SNOWSHOES, LAYERS, HYDRATE, SUNSCREEN,
         RECOVERY_GEAR, AVOID_RUTS, TRAIL_CLOSURES, LET_TRAILS_DRY, DUSTY, BLAZE_ORANGE, BLACK_FLIES, TICKS,
         MOSQUITOES, SHORT_DAYLIGHT, DARK_SKIES, MOONLIT, OFFSHORE_WIND, DRY_BAG,
+        // Winter and seasonal activities
+        WINTER_GEAR, POWDER_DAY, ICY_SURFACES, LIFT_HOLDS, THIN_COVER, CHECK_SNOW_REPORT, SPRING_SNOW, RAIN_ON_SNOW,
+        KICK_WAX, BREAK_TRAIL, TRAIL_REPORT, ICE_CHECK, ICE_WEAKENING, HAND_WARMERS, COLD_WATER_SWIM, LIGHTNING_SWIM,
+        TRACKING_SNOW, LEGAL_HOURS, MEAT_CARE, QUIET_WIND, SCENT_WIND,
         // Allergies
         ALLERGY_WINDOWS, ALLERGY_SHOWER, ALLERGY_MEDICATE, ALLERGY_TIMING, ALLERGY_RAIN_HELPS, ALLERGY_WIND,
         ALLERGY_MASK_YARDWORK, ALLERGY_THUNDERSTORM, ALLERGY_AIR, ALLERGY_QUIET,
@@ -165,8 +178,11 @@ data class ActivityScore(
     val activity: Activity,
     val score: Int,
     val tips: List<Tip>,
+    /** Seasonal name, e.g. "Winter hiking" or "Fat biking"; null uses the activity's own label. */
+    val title: String? = null,
 ) {
     val band: ScoreBand get() = ScoreBand.of(score)
+    val label: String get() = title ?: activity.label
 }
 
 // --- Foliage ---

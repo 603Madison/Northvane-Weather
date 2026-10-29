@@ -9,4 +9,6 @@
     <string name="channel_advisories_desc">NWS advisories: less serious conditions that may cause inconvenience.</string>
     <string name="channel_statements">Statements &amp; other</string>
     <string name="channel_statements_desc">Special weather statements, outlooks and other NWS messages.</string>
+    <string name="channel_laundry">Laundry</string>
+    <string name="channel_laundry_desc">Warnings to bring laundry in before rain, while you have clothes on the line.</string>
 </resources>

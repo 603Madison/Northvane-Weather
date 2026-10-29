@@ -67,6 +67,22 @@ class AcisClient(
         )
     }
 
+    /**
+     * Daily lows (°F) for the last [years] full years from the PRISM grid,
+     * for frost-date climatology. About 40 KB compressed; cache the result.
+     */
+    suspend fun dailyLows(point: GeoPoint, lastYear: Int, years: Int = 30): List<Pair<LocalDate, Double>> {
+        val p = point.rounded()
+        val body = buildJsonObject {
+            put("loc", "${GeoPoint.format(p.longitude)},${GeoPoint.format(p.latitude)}")
+            put("sdate", "${lastYear - years + 1}-01-01")
+            put("edate", "$lastYear-12-31")
+            put("grid", "21")
+            put("elems", "mint")
+        }.toString()
+        return parseDailyLows(post("GridData", body, maxBytes = 2L * 1024 * 1024))
+    }
+
     private fun snowRequest(p: GeoPoint, today: LocalDate): String = buildJsonObject {
         // ~25 km box; reports come from airports, COOP observers and CoCoRaHS volunteers.
         val dLat = 0.25
@@ -78,12 +94,12 @@ class AcisClient(
         put("meta", "name,ll")
     }.toString()
 
-    private suspend fun post(endpoint: String, body: String): String {
+    private suspend fun post(endpoint: String, body: String, maxBytes: Long = 512L * 1024): String {
         val request = Request.Builder()
             .url("$baseUrl/$endpoint")
             .post(body.toRequestBody(JSON))
             .build()
-        val response = http.fetch(request, maxBytes = 512L * 1024)
+        val response = http.fetch(request, maxBytes = maxBytes)
         if (response.code !in 200..299) throw HttpStatusException(response.code, "NOAA ACIS")
         return response.body
     }
@@ -114,6 +130,18 @@ class AcisClient(
             if (days.isEmpty()) throw HistoryUnavailableException()
             // Coastal cells over water report -32768 (missing).
             return days to root.obj("meta")?.dbl("elev")?.takeIf { it in -300.0..21_000.0 }
+        }
+
+        fun parseDailyLows(json: String): List<Pair<LocalDate, Double>> {
+            val root = runCatching { NorthvaneJson.parseToJsonElement(json).asObj() }.getOrNull()
+                ?: throw ParseException("Unexpected response from NOAA ACIS")
+            root.str("error")?.let { throw HistoryUnavailableException() }
+            return root.arr("data").orEmpty().mapNotNull { row ->
+                val cells = row as? JsonArray ?: return@mapNotNull null
+                val date = runCatching { LocalDate.parse((cells[0] as JsonPrimitive).content) }.getOrNull() ?: return@mapNotNull null
+                val v = (cells.getOrNull(1) as? JsonPrimitive)?.content?.toDoubleOrNull()?.takeIf { it > MISSING } ?: return@mapNotNull null
+                date to v
+            }
         }
 
         /** Most recent snow depth at the nearest station that reported one: (mm, station name). */

@@ -106,6 +106,10 @@ import app.northvane.weather.ui.theme.skyGradient
 import app.northvane.weather.ui.theme.warningGradient
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.outlook.AllergyEstimator
+import app.northvane.core.outlook.DryingAdvisor
+import app.northvane.core.outlook.HeatingAdvisor
+import app.northvane.core.garden.GardenAdvisor
+import app.northvane.core.garden.Crop
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.roundToInt
@@ -118,6 +122,9 @@ class HomeActions(
     val dismissError: () -> Unit,
     val markNotificationPromptShown: () -> Unit,
     val checkAlertsNow: () -> Unit,
+    val setHourlyExpanded: (Boolean) -> Unit = {},
+    val laundryOut: (Boolean) -> Unit = {},
+    val markPlanted: (Crop) -> Unit = {},
 )
 
 @Composable
@@ -129,12 +136,13 @@ fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenSources: () -> Unit = onOpenSettings,
     onOpenAllergies: () -> Unit = onOpenSettings,
+    onOpenHeating: () -> Unit = onOpenSettings,
 ) {
     val snapshot = state.snapshot
     // A warning (not a watch, advisory or statement) turns the Today screen red.
     val warning = remember(snapshot?.alerts, snapshot?.fetchedAt) { snapshot?.hasActiveWarning(Instant.now()) == true }
     WarningTheme(active = warning) {
-        HomeContent(state, actions, warning, onOpenAlerts, onOpenLocations, onOpenSettings, onOpenSources, onOpenAllergies)
+        HomeContent(state, actions, warning, onOpenAlerts, onOpenLocations, onOpenSettings, onOpenSources, onOpenAllergies, onOpenHeating)
     }
 }
 
@@ -148,6 +156,7 @@ private fun HomeContent(
     onOpenSettings: () -> Unit,
     onOpenSources: () -> Unit,
     onOpenAllergies: () -> Unit,
+    onOpenHeating: () -> Unit,
 ) {
     val context = LocalContext.current
     val snapshot = state.snapshot
@@ -237,7 +246,7 @@ private fun HomeContent(
                             item { AlertBanner(snapshot.alerts, time, onOpenAlerts) }
                         }
                         if (snapshot.hourly.isNotEmpty()) {
-                            item { HourlySection(snapshot.hourly, formatter, time) }
+                            item { HourlySection(snapshot.hourly, formatter, time, state.settings.hourlyExpanded, actions.setHourlyExpanded) }
                         } else if (Section.HOURLY_FORECAST in snapshot.skippedSections) {
                             item { HintText("Hourly forecast is turned off for satellite connections.") }
                         }
@@ -250,6 +259,7 @@ private fun HomeContent(
                                     showOutage = settings.outageRiskEnabled,
                                     activities = activities,
                                     showMud = settings.mudEnabled,
+                                    heatTypes = if (settings.heatingEnabled) settings.heatSources.map { it.type }.distinct() else emptyList(),
                                 )
                             }
                         }
@@ -261,14 +271,10 @@ private fun HomeContent(
                         if (settings.uvEnabled && uv != null) {
                             item { UvSection(uv, time) }
                         }
-                        if (settings.allergyEnabled) {
+                        if (settings.dryingEnabled && snapshot.hourly.isNotEmpty()) {
                             item {
-                                val allergyDays = remember(snapshot, settings.allergies) {
-                                    AllergyEstimator.forecast(settings.allergies, snapshot.daily, snapshot.pollen, snapshot.airQuality, time.today())
-                                }
-                                AllergySection(
-                                    allergyDays, settings.allergies.isNotEmpty(), state.pollenKeySet, formatter, time, onOpenAllergies,
-                                )
+                                val drying = remember(snapshot) { DryingAdvisor.report(snapshot.hourly, snapshot.daily, Instant.now(), zone) }
+                                DryingSection(drying, settings.laundryOutSince != null, formatter, time, actions.laundryOut)
                             }
                         }
                         if (activities.isNotEmpty()) {
@@ -278,7 +284,33 @@ private fun HomeContent(
                             item { MudSection(snapshot.daily, formatter, time) }
                         }
                         if (settings.pollenEnabled) {
-                            item { PollenSection(snapshot.pollen, hasKey = state.pollenKeySet, time = time, onOpenSources = onOpenSources) }
+                            item {
+                                val allergyDays = remember(snapshot, settings.allergies) {
+                                    AllergyEstimator.forecast(settings.allergies, snapshot.daily, snapshot.pollen, snapshot.airQuality, time.today())
+                                }
+                                // Personal allergy forecast lives in the pollen card, and only with real pollen data.
+                                val allergy: (@Composable () -> Unit)? = if (settings.allergyEnabled && state.pollenKeySet && snapshot.pollen != null) {
+                                    { AllergyBlock(allergyDays, settings.allergies.isNotEmpty(), formatter, time, onOpenAllergies) }
+                                } else {
+                                    null
+                                }
+                                PollenSection(snapshot.pollen, hasKey = state.pollenKeySet, time = time, onOpenSources = onOpenSources, allergyContent = allergy)
+                            }
+                        }
+                        val climate = state.frostClimate
+                        if (settings.gardenEnabled && climate != null && settings.gardenPlan.isNotEmpty()) {
+                            val garden = GardenAdvisor.report(settings.gardenPlan, climate, snapshot.daily, snapshot.history, time.today())
+                            if ((settings.gardenPlanting && garden.showPlanting) || (settings.gardenHarvest && garden.showHarvest) || garden.inGrowingSeason) {
+                                item { GardenSection(garden, settings, formatter, time, actions.markPlanted) }
+                            }
+                        }
+                        if (settings.heatingEnabled && HeatingAdvisor.visible(time.today(), settings.heatSources)) {
+                            item {
+                                val heating = remember(snapshot, settings.heatSources, climate) {
+                                    HeatingAdvisor.report(settings.heatSources, snapshot.daily, snapshot.history, climate, time.today())
+                                }
+                                HeatingSection(heating, settings.heatSources.isNotEmpty(), formatter, time, onOpenHeating)
+                            }
                         }
                         val foliage = snapshot.foliage
                         if (settings.foliageEnabled && foliage != null) {

@@ -13,6 +13,10 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.model.UnitSystem
 import app.northvane.core.model.Activity
+import app.northvane.core.garden.GardenCrop
+import app.northvane.core.json.NorthvaneJson
+import app.northvane.core.outlook.HeatSource
+import kotlinx.serialization.builtins.ListSerializer
 import app.northvane.core.model.Allergen
 import app.northvane.core.model.Sensitivity
 import app.northvane.weather.ui.theme.AppTheme
@@ -52,6 +56,7 @@ enum class SatelliteFeature(val title: String, val description: String, val appr
     SATELLITE_IMAGERY("Satellite imagery", "GOES cloud imagery under the radar", "0.3–2 MB per view", false),
     AIR_QUALITY("Air quality & UV", "AQI (EPA AirNow or Open-Meteo) and EPA UV index; at most every 30 minutes", "~3 KB", true),
     TRAFFIC("Traffic events", "Work zones, closures and incidents from state DOT feeds", "50–700 KB per view", false),
+    GARDEN_CLIMATE("Garden & heating frost dates", "30 years of NOAA lows, downloaded once per place", "~40 KB once", true),
     TRAFFIC_FLOW("Traffic speed map", "TomTom flow tiles on the traffic map, if you've added a key", "0.3–1 MB per view", false),
     OWM_FALLBACK("OpenWeatherMap fallback", "Only if enabled in Data sources", "~5 KB", false);
 
@@ -97,6 +102,21 @@ data class AppSettings(
     val trafficEnabled: Boolean = true,
     val trafficRadiusKm: Double = 40.0,
     val trafficFlowLayer: Boolean = true,
+    val hourlyExpanded: Boolean = false,
+    val dryingEnabled: Boolean = true,
+    /** When the user said laundry is out on the line (epoch ms), for rain warnings. */
+    val laundryOutSince: Long? = null,
+    val laundryLocationId: String? = null,
+    val gardenEnabled: Boolean = false,
+    val gardenPlanting: Boolean = true,
+    val gardenHarvest: Boolean = true,
+    val gardenFrostAlerts: Boolean = true,
+    val gardenWatering: Boolean = true,
+    val gardenSoil: Boolean = true,
+    val gardenGdd: Boolean = false,
+    val gardenPlan: List<GardenCrop> = emptyList(),
+    val heatingEnabled: Boolean = false,
+    val heatSources: List<HeatSource> = emptyList(),
 ) {
     companion object {
         private fun defaultUnits(): UnitSystem =
@@ -128,7 +148,8 @@ class SettingsRepository(context: Context) {
         val outageRisk = booleanPreferencesKey("outage_risk")
         val pollen = booleanPreferencesKey("pollen")
         val activitiesEnabled = booleanPreferencesKey("activities_enabled")
-        val activities = stringSetPreferencesKey("activities")
+        val activities = stringSetPreferencesKey("activities") // 1.1–1.2: enabled set (only the original six existed)
+        val activitiesOff = stringSetPreferencesKey("activities_off")
         val mud = booleanPreferencesKey("mud")
         val foliage = booleanPreferencesKey("foliage")
         val satelliteLayer = booleanPreferencesKey("satellite_layer")
@@ -145,7 +166,24 @@ class SettingsRepository(context: Context) {
         val traffic = booleanPreferencesKey("traffic")
         val trafficRadius = doublePreferencesKey("traffic_radius_km")
         val trafficFlow = booleanPreferencesKey("traffic_flow")
+        val hourlyExpanded = booleanPreferencesKey("hourly_expanded")
+        val drying = booleanPreferencesKey("drying")
+        val laundryOut = longPreferencesKey("laundry_out_since")
+        val laundryLocation = stringPreferencesKey("laundry_location")
+        val garden = booleanPreferencesKey("garden")
+        val gardenPlanting = booleanPreferencesKey("garden_planting")
+        val gardenHarvest = booleanPreferencesKey("garden_harvest")
+        val gardenFrost = booleanPreferencesKey("garden_frost")
+        val gardenWatering = booleanPreferencesKey("garden_watering")
+        val gardenSoil = booleanPreferencesKey("garden_soil")
+        val gardenGdd = booleanPreferencesKey("garden_gdd")
+        val gardenPlan = stringPreferencesKey("garden_plan")
+        val heating = booleanPreferencesKey("heating")
+        val heatSources = stringPreferencesKey("heat_sources")
     }
+
+    private val gardenList = ListSerializer(GardenCrop.serializer())
+    private val heatList = ListSerializer(HeatSource.serializer())
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
         this?.let { name -> enumValues<T>().firstOrNull { it.name == name } } ?: default
@@ -177,9 +215,7 @@ class SettingsRepository(context: Context) {
                 outageRiskEnabled = p[Keys.outageRisk] ?: d.outageRiskEnabled,
                 pollenEnabled = p[Keys.pollen] ?: d.pollenEnabled,
                 activitiesEnabled = p[Keys.activitiesEnabled] ?: d.activitiesEnabled,
-                activities = p[Keys.activities]
-                    ?.mapNotNull { name -> Activity.entries.firstOrNull { it.name == name } }
-                    ?.toSet() ?: d.activities,
+                activities = Activity.entries.toSet() - disabledActivities(p),
                 mudEnabled = p[Keys.mud] ?: d.mudEnabled,
                 foliageEnabled = p[Keys.foliage] ?: d.foliageEnabled,
                 satelliteLayer = p[Keys.satelliteLayer] ?: d.satelliteLayer,
@@ -200,6 +236,20 @@ class SettingsRepository(context: Context) {
                 trafficEnabled = p[Keys.traffic] ?: d.trafficEnabled,
                 trafficRadiusKm = p[Keys.trafficRadius] ?: d.trafficRadiusKm,
                 trafficFlowLayer = p[Keys.trafficFlow] ?: d.trafficFlowLayer,
+                hourlyExpanded = p[Keys.hourlyExpanded] ?: d.hourlyExpanded,
+                dryingEnabled = p[Keys.drying] ?: d.dryingEnabled,
+                laundryOutSince = p[Keys.laundryOut],
+                laundryLocationId = p[Keys.laundryLocation],
+                gardenEnabled = p[Keys.garden] ?: d.gardenEnabled,
+                gardenPlanting = p[Keys.gardenPlanting] ?: d.gardenPlanting,
+                gardenHarvest = p[Keys.gardenHarvest] ?: d.gardenHarvest,
+                gardenFrostAlerts = p[Keys.gardenFrost] ?: d.gardenFrostAlerts,
+                gardenWatering = p[Keys.gardenWatering] ?: d.gardenWatering,
+                gardenSoil = p[Keys.gardenSoil] ?: d.gardenSoil,
+                gardenGdd = p[Keys.gardenGdd] ?: d.gardenGdd,
+                gardenPlan = p[Keys.gardenPlan]?.let { runCatching { NorthvaneJson.decodeFromString(gardenList, it) }.getOrNull() } ?: d.gardenPlan,
+                heatingEnabled = p[Keys.heating] ?: d.heatingEnabled,
+                heatSources = p[Keys.heatSources]?.let { runCatching { NorthvaneJson.decodeFromString(heatList, it) }.getOrNull() } ?: d.heatSources,
             )
         }
 
@@ -232,9 +282,25 @@ class SettingsRepository(context: Context) {
     suspend fun setOutageRisk(enabled: Boolean) = store.edit { it[Keys.outageRisk] = enabled }
     suspend fun setPollen(enabled: Boolean) = store.edit { it[Keys.pollen] = enabled }
     suspend fun setActivitiesEnabled(enabled: Boolean) = store.edit { it[Keys.activitiesEnabled] = enabled }
+    /**
+     * Activities are stored as the set the user turned *off*, so activities
+     * added in later versions show up for existing users too.
+     */
+    private fun disabledActivities(p: Preferences): Set<Activity> {
+        p[Keys.activitiesOff]?.let { off -> return off.mapNotNull { n -> Activity.entries.firstOrNull { it.name == n } }.toSet() }
+        val oldEnabled = p[Keys.activities] ?: return emptySet()
+        return ORIGINAL_ACTIVITIES.filterNot { it.name in oldEnabled }.toSet()
+    }
+
     suspend fun setActivity(activity: Activity, enabled: Boolean) = store.edit { p ->
-        val current = p[Keys.activities] ?: Activity.entries.map { it.name }.toSet()
-        p[Keys.activities] = if (enabled) current + activity.name else current - activity.name
+        val off = disabledActivities(p).map { it.name }.toSet()
+        p[Keys.activitiesOff] = if (enabled) off - activity.name else off + activity.name
+    }
+
+    private companion object {
+        val ORIGINAL_ACTIVITIES = listOf(
+            Activity.HIKING, Activity.CAMPING, Activity.OFF_ROADING, Activity.MOUNTAIN_BIKING, Activity.PADDLING, Activity.STARGAZING,
+        )
     }
     suspend fun setMud(enabled: Boolean) = store.edit { it[Keys.mud] = enabled }
     suspend fun setFoliage(enabled: Boolean) = store.edit { it[Keys.foliage] = enabled }
@@ -256,4 +322,38 @@ class SettingsRepository(context: Context) {
     suspend fun setTraffic(enabled: Boolean) = store.edit { it[Keys.traffic] = enabled }
     suspend fun setTrafficRadius(km: Double) = store.edit { it[Keys.trafficRadius] = km.coerceIn(5.0, 160.0) }
     suspend fun setTrafficFlow(enabled: Boolean) = store.edit { it[Keys.trafficFlow] = enabled }
+    suspend fun setHourlyExpanded(expanded: Boolean) = store.edit { it[Keys.hourlyExpanded] = expanded }
+    suspend fun setDrying(enabled: Boolean) = store.edit { it[Keys.drying] = enabled }
+    suspend fun setLaundryOut(locationId: String?) = store.edit {
+        if (locationId == null) {
+            it.remove(Keys.laundryOut)
+            it.remove(Keys.laundryLocation)
+        } else {
+            it[Keys.laundryOut] = System.currentTimeMillis()
+            it[Keys.laundryLocation] = locationId
+        }
+    }
+    suspend fun setGarden(enabled: Boolean) = store.edit { it[Keys.garden] = enabled }
+    suspend fun setGardenOption(option: GardenOption, enabled: Boolean) = store.edit {
+        it[when (option) {
+            GardenOption.PLANTING -> Keys.gardenPlanting
+            GardenOption.HARVEST -> Keys.gardenHarvest
+            GardenOption.FROST_ALERTS -> Keys.gardenFrost
+            GardenOption.WATERING -> Keys.gardenWatering
+            GardenOption.SOIL -> Keys.gardenSoil
+            GardenOption.GDD -> Keys.gardenGdd
+        }] = enabled
+    }
+    suspend fun setGardenPlan(plan: List<GardenCrop>) = store.edit { it[Keys.gardenPlan] = NorthvaneJson.encodeToString(gardenList, plan) }
+    suspend fun setHeating(enabled: Boolean) = store.edit { it[Keys.heating] = enabled }
+    suspend fun setHeatSources(sources: List<HeatSource>) = store.edit { it[Keys.heatSources] = NorthvaneJson.encodeToString(heatList, sources) }
+}
+
+enum class GardenOption(val title: String, val description: String) {
+    PLANTING("Planting schedule", "When to start seeds indoors, harden off, and plant out, checked against the forecast"),
+    HARVEST("Harvest schedule", "When crops should be ready, and what to pick or cover before frost"),
+    FROST_ALERTS("Frost & freeze alerts", "Notify for NWS Frost Advisories and Freeze Warnings even if advisories are off, plus frost nights on the card"),
+    WATERING("Watering advice", "About an inch a week: past week's rain from NOAA and rain in the forecast"),
+    SOIL("Soil readiness", "Estimated soil temperature, and whether the ground is too wet or frozen to work"),
+    GDD("Growing degree days", "Heat units since March 1 (base 50°F), for corn and pest timing"),
 }

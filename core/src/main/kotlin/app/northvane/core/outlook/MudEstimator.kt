@@ -26,6 +26,8 @@ import kotlin.math.sqrt
  * - Ground that is frozen solid, or under snow, isn't muddy.
  */
 object MudEstimator {
+    /** Settled snowpack depth per unit of water equivalent. */
+    private const val SNOW_RATIO = 4.0
 
     private data class DayInput(val date: LocalDate, val highC: Double?, val lowC: Double?, val precipMm: Double?, val forecast: Boolean)
 
@@ -68,11 +70,11 @@ object MudEstimator {
         for (day in observed + ahead) {
             if (day.forecast && !snowDepthApplied) {
                 // A measured snow depth is better than our running guess; ~4:1 for settled snow.
-                history?.snowDepthMm?.let { state.swe = it / 4.0 }
+                history?.snowDepthMm?.let { state.swe = it / SNOW_RATIO }
                 snowDepthApplied = true
             }
             step(state, day)
-            if (day.forecast) result[day.date] = classify(state, day, noHistory)
+            if (day.forecast) result[day.date] = classify(state, day, noHistory).copy(snowDepthMm = (state.swe * SNOW_RATIO).takeIf { it >= 5 } ?: 0.0)
         }
         return result
     }

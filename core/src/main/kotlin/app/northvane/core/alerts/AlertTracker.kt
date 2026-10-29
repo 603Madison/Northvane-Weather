@@ -28,6 +28,8 @@ class AlertTracker(private val retention: Duration = Duration.ofDays(10)) {
         enabled: Set<AlertCategory>,
         state: NotifiedAlerts,
         now: Instant,
+        /** Extra alerts to notify regardless of category (e.g. frost advisories for gardeners). */
+        alsoNotify: (WeatherAlert) -> Boolean = { false },
     ): Pair<List<AlertToNotify>, NotifiedAlerts> {
         val cutoff = now.minus(retention).toEpochMilli()
         val entries = state.entries.filterValues { it >= cutoff }.toMutableMap()
@@ -37,7 +39,7 @@ class AlertTracker(private val retention: Duration = Duration.ofDays(10)) {
 
         val toNotify = mutableListOf<AlertToNotify>()
         for (alert in alerts) {
-            if (alert.category !in enabled) continue
+            if (alert.category !in enabled && !alsoNotify(alert)) continue
             val key = key(locationId, alert)
             if (key in entries) continue
             entries[key] = now.toEpochMilli()

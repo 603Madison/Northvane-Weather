@@ -14,6 +14,8 @@ import app.northvane.weather.AppContainer
 import app.northvane.weather.data.AppSettings
 import app.northvane.weather.data.LocationStore
 import app.northvane.weather.data.SecretStore
+import app.northvane.weather.data.SatelliteFeature
+import app.northvane.core.garden.FrostClimate
 import app.northvane.weather.net.NetworkStatus
 import app.northvane.weather.net.isLimited
 import kotlinx.coroutines.flow.first
@@ -45,6 +47,8 @@ data class MainUiState(
     val liteMode: Boolean = false,
     /** Whether a Google Pollen API key is saved (the key itself never leaves the secret store). */
     val pollenKeySet: Boolean = false,
+    /** Frost-date climatology for the selected place (garden and heating cards). */
+    val frostClimate: FrostClimate? = null,
 )
 
 /** Activity-scoped state shared by the Today, Radar and Alerts tabs. */
@@ -52,6 +56,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
     private val snapshots = MutableStateFlow<Map<String, WeatherSnapshot>>(emptyMap())
     private val refreshing = MutableStateFlow(false)
     private val error = MutableStateFlow<String?>(null)
+    private val climates = MutableStateFlow<Map<String, FrostClimate>>(emptyMap())
     private var refreshJob: Job? = null
     private var refreshingId: String? = null
 
@@ -61,7 +66,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
         container.connectivity.status,
     ) { locations, settings, network -> Triple(locations, settings, network) }
 
-    val state: StateFlow<MainUiState> = combine(inputs, snapshots, refreshing, error) { input, snaps, isRefreshing, err ->
+    val state: StateFlow<MainUiState> = combine(inputs, snapshots, refreshing, error, climates) { input, snaps, isRefreshing, err, climateMap ->
         val (locations, settings, network) = input
         val selected = locations.firstOrNull { it.id == settings.selectedLocationId } ?: locations.firstOrNull()
         MainUiState(
@@ -75,10 +80,21 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             network = network,
             liteMode = isLimited(settings, network),
             pollenKeySet = settings.pollenEnabled && container.secrets.has(SecretStore.POLLEN_API_KEY),
+            frostClimate = selected?.let { climateMap[it.id] },
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MainUiState())
 
     init {
+        // Frost dates are only downloaded for people who use the garden or heating cards.
+        viewModelScope.launch {
+            state.map { Triple(it.selected, it.settings.gardenEnabled || it.settings.heatingEnabled, it.liteMode) }
+                .distinctUntilChanged { a, b -> a.first?.id == b.first?.id && a.second == b.second && a.third == b.third }
+                .collect { (location, wanted, lite) ->
+                    if (location == null || !wanted || climates.value.containsKey(location.id)) return@collect
+                    val allowed = !lite || SatelliteFeature.GARDEN_CLIMATE in state.value.settings.satelliteFeatures
+                    container.climate.get(location.point, allowDownload = allowed)?.let { c -> climates.update { it + (location.id to c) } }
+                }
+        }
         viewModelScope.launch {
             state.map { it.selected }.filterNotNull().distinctUntilChanged { a, b -> a.id == b.id }.collect { location ->
                 error.value = null
@@ -187,6 +203,26 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
 
     fun setLocationNotify(id: String, enabled: Boolean) {
         viewModelScope.launch { container.locations.setNotify(id, enabled) }
+    }
+
+    /** Marks a crop planted today (harvest timing then counts from now). */
+    fun markPlanted(crop: app.northvane.core.garden.Crop) {
+        viewModelScope.launch {
+            val plan = state.value.settings.gardenPlan
+            container.settings.setGardenPlan(plan.map { if (it.crop == crop) it.copy(plantedOn = java.time.LocalDate.now()) else it })
+        }
+    }
+
+    fun setHourlyExpanded(expanded: Boolean) {
+        viewModelScope.launch { container.settings.setHourlyExpanded(expanded) }
+    }
+
+    /** Laundry is out on the line at the selected place: watch the forecast for rain. */
+    fun laundryOut(out: Boolean) {
+        viewModelScope.launch {
+            container.settings.setLaundryOut(if (out) state.value.selected?.id else null)
+            if (out) app.northvane.weather.work.LaundryWatchWorker.start(container.app) else app.northvane.weather.work.LaundryWatchWorker.stop(container.app)
+        }
     }
 
     fun dismissError() {

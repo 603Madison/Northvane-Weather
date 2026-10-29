@@ -22,6 +22,11 @@ import app.northvane.core.nws.NwsClient
 import app.northvane.core.nws.NwsGridData
 import app.northvane.core.nws.NwsParsers
 import app.northvane.core.history.AcisClient
+import app.northvane.core.garden.Crop
+import app.northvane.core.garden.FrostClimate
+import app.northvane.core.garden.GardenCrop
+import app.northvane.core.outlook.HeatSource
+import app.northvane.core.outlook.HeatType
 import app.northvane.core.air.EpaUvClient
 import app.northvane.core.air.OpenMeteoAirClient
 import app.northvane.core.model.Allergen
@@ -149,6 +154,19 @@ class ScreenshotTest {
             units = UnitSystem.IMPERIAL,
             pollenEnabled = true,
             allergies = mapOf(Allergen.BIRCH to Sensitivity.SEVERE, Allergen.GRASS to Sensitivity.MILD, Allergen.MOLD to Sensitivity.MODERATE),
+            gardenEnabled = true,
+            gardenPlan = listOf(
+                GardenCrop(Crop.TOMATO, plantedOn = java.time.LocalDate.now().withMonth(5).withDayOfMonth(20)),
+                GardenCrop(Crop.KALE, plantedOn = java.time.LocalDate.now().withMonth(4).withDayOfMonth(25)),
+                GardenCrop(Crop.WINTER_SQUASH, plantedOn = java.time.LocalDate.now().withMonth(5).withDayOfMonth(25)),
+                GardenCrop(Crop.GARLIC),
+            ),
+            heatingEnabled = true,
+            heatSources = listOf(
+                HeatSource("hp", HeatType.HEAT_PUMP, minF = 20),
+                HeatSource("wood", HeatType.WOOD, maxF = 32),
+                HeatSource("oil", HeatType.OIL, maxF = 5),
+            ),
         ),
         network: NetworkStatus = NetworkStatus(),
         liteMode: Boolean = false,
@@ -161,7 +179,10 @@ class ScreenshotTest {
         network = network,
         liteMode = liteMode,
         pollenKeySet = settings.pollenEnabled,
+        frostClimate = climate,
     )
+
+    private val climate by lazy { FrostClimate.compute(AcisClient.parseDailyLows(resource("mint30.json")), Instant.now()) }
 
     private val noActions = HomeActions({}, {}, {}, {}, {}, {})
 
@@ -191,6 +212,14 @@ class ScreenshotTest {
         save("today_full_light")
         compose.onAllNodesWithText("Hiking")[0].performClick()
         save("today_full_light_hiking_open")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1300dp-xxhdpi")
+    fun hourlyExpanded() {
+        val st = state()
+        render(dark = false) { HomeScreen(st.copy(settings = st.settings.copy(hourlyExpanded = true)), noActions, {}, {}, {}) }
+        save("today_hourly_expanded")
     }
 
     @Test
@@ -317,6 +346,8 @@ class ScreenshotTest {
         val name = java.time.format.TextStyle.SHORT.let { storm.daily[2].date.dayOfWeek.getDisplayName(it, java.util.Locale.getDefault()) }
         compose.onAllNodesWithText(name)[0].performClick()
         save("today_noreaster_dark")
+        compose.onAllNodesWithText("Tap for how to prepare")[0].performClick()
+        save("today_noreaster_prepare")
     }
 
     @Test

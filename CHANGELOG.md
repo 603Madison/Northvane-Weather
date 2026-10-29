@@ -3,6 +3,22 @@
 All notable changes to Northvane. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.3.0] - 2026-10-29
+
+### Added
+- **Garden** (off by default): choose what you're growing (30 vegetables, herbs, fruit and flowers) and how (start seeds indoors, buy transplants, sow outdoors). A **planting** card shows when to start seeds indoors, harden off, and plant out or sow, timed to your local frost dates (from 30 years of NOAA daily lows) and confirmed against the forecast: no frost below each crop's limit in the coming nights, and warm enough soil. A **harvest** card shows when crops should be ready, what to pick or cover before frost, and which crops get sweeter after a frost. Garlic gets a fall planting reminder. Each card appears only in season. Optional extras: frost & freeze notifications (even with advisories off), watering advice, soil readiness and estimated soil temperature, and growing degree days.
+- **Clothes drying**: the best line-drying window for the next two days with an estimated drying time, a 7-day ranking, and never below freezing. Tap "My laundry is out" to get a notification before rain or thunder (and evening dew).
+- **Heating season** (off by default): list your heat sources and the outdoor temperatures you use each in. The card shows which system to run each day this week, heating degree days, and seasonal chores timed to your climate: fuel pre-buys, seasoned wood, next year's wood stacking, pellets, service and chimney sweeps, cold-snap tank checks, pipes and heat-pump care.
+- **Winter activities**, shown only with confirmed snow on the ground: downhill skiing (powder days, wind holds, icy surfaces), cross-country skiing (with kick-wax suggestions), snowshoeing, snowmobiling, and ice fishing once lakes have likely frozen solid (with an estimated ice thickness and safety guidance).
+- **Swimming** in summer and **hunting** during fall and spring turkey seasons.
+- **Outage preparation**: tap a High or Very high outage risk for steps to get ready, including which of your heat sources need power.
+
+### Changed
+- Hiking, camping and mountain biking become **winter hiking**, **winter camping** and **fat biking** in winter, with winter gear advice; paddling and off-roading hide while there's snowpack.
+- The hourly card shows just temperature and precipitation by default; tap it for everything else. It remembers your choice.
+- The power outage panel now comes after the activity scores in each day's details.
+- The personal allergy forecast moved into the pollen card and appears only when pollen data is available.
+
 ## [1.2.0] - 2026-10-29
 
 ### Added

@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import app.northvane.weather.ui.settings.AllergiesScreen
 import app.northvane.weather.ui.settings.ThemesScreen
+import app.northvane.weather.ui.settings.GardenScreen
+import app.northvane.weather.ui.settings.HeatingScreen
 import app.northvane.weather.ui.theme.LocalBackdrop
 import app.northvane.weather.ui.theme.LocalIsDark
 import app.northvane.weather.ui.traffic.TrafficScreen
@@ -70,6 +72,8 @@ object Routes {
     const val TRAFFIC = "traffic"
     const val ALLERGIES = "allergies"
     const val THEMES = "themes"
+    const val GARDEN = "garden"
+    const val HEATING = "heating"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -107,6 +111,9 @@ fun NorthvaneRoot(
             dismissError = vm::dismissError,
             markNotificationPromptShown = vm::markNotificationPromptShown,
             checkAlertsNow = vm::checkAlertsNow,
+            setHourlyExpanded = vm::setHourlyExpanded,
+            laundryOut = vm::laundryOut,
+            markPlanted = vm::markPlanted,
         )
     }
 
@@ -160,6 +167,7 @@ fun NorthvaneRoot(
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSources = { navController.navigate(Routes.SOURCES) },
                     onOpenAllergies = { navController.navigate(Routes.ALLERGIES) },
+                    onOpenHeating = { navController.navigate(Routes.HEATING) },
                 )
             }
             composable(Routes.RADAR) {
@@ -170,6 +178,12 @@ fun NorthvaneRoot(
             }
             composable(Routes.ALLERGIES) {
                 AllergiesScreen(state = state, container = container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.GARDEN) {
+                GardenScreen(state = state, container = container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.HEATING) {
+                HeatingScreen(state = state, container = container, onBack = { navController.popBackStack() })
             }
             composable(Routes.THEMES) {
                 ThemesScreen(state = state, container = container, onBack = { navController.popBackStack() })
@@ -192,6 +206,8 @@ fun NorthvaneRoot(
                     onOpenSources = { navController.navigate(Routes.SOURCES) },
                     onOpenAllergies = { navController.navigate(Routes.ALLERGIES) },
                     onOpenThemes = { navController.navigate(Routes.THEMES) },
+                    onOpenGarden = { navController.navigate(Routes.GARDEN) },
+                    onOpenHeating = { navController.navigate(Routes.HEATING) },
                 )
             }
             composable(Routes.SOURCES) {

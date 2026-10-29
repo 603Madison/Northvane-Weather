@@ -150,7 +150,7 @@ private fun ActivityRow(score: ActivityScore, f: UnitFormatter) {
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(score.activity.label, style = MaterialTheme.typography.titleSmall)
+                    Text(score.label, style = MaterialTheme.typography.titleSmall)
                     if (score.activity.overnight) {
                         Spacer(Modifier.width(6.dp))
                         Text("overnight", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -204,7 +204,7 @@ internal fun ActivityStrip(scores: List<ActivityScore>) {
         scores.forEach { s ->
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 ScoreRing(s.score, bandColor(s.band), Modifier.size(34.dp))
-                Text(s.activity.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(s.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -284,7 +284,13 @@ private fun MudMeter(mud: MudOutlook, modifier: Modifier = Modifier) {
 // --- Pollen ---
 
 @Composable
-internal fun PollenSection(pollen: PollenForecast?, hasKey: Boolean, time: TimeFormat, onOpenSources: () -> Unit) {
+internal fun PollenSection(
+    pollen: PollenForecast?,
+    hasKey: Boolean,
+    time: TimeFormat,
+    onOpenSources: () -> Unit,
+    allergyContent: (@Composable () -> Unit)? = null,
+) {
     Column {
         SectionTitle("Pollen")
         OutlookCard {
@@ -327,6 +333,10 @@ internal fun PollenSection(pollen: PollenForecast?, hasKey: Boolean, time: TimeF
                                     }
                                 }
                             }
+                        }
+                        allergyContent?.let {
+                            HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                            it()
                         }
                         Muted("Google Pollen API", Modifier.padding(top = 10.dp))
                     }

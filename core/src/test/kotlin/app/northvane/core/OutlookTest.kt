@@ -377,7 +377,7 @@ class OutlookTest {
             history = history,
         )
         val out = Outlooks.annotate(snapshot, 43.66, -70.26)
-        assertTrue(out.daily.all { it.mud != null && it.activities.size == Activity.entries.size && it.outageRisk != null })
+        assertTrue(out.daily.all { it.mud != null && it.activities.isNotEmpty() && it.outageRisk != null })
         assertTrue(out.daily.all { it.daytime != null && it.overnight != null })
         val foliage = assertNotNull(out.foliage)
         assertTrue(foliage.today!!.stage >= FoliageStage.PEAK, "${foliage.today}")

@@ -35,7 +35,7 @@ class AlertCheckWorker(appContext: Context, params: WorkerParameters) : Coroutin
     override suspend fun doWork(): Result {
         val container = (applicationContext as NorthvaneApp).container
         val settings = container.settings.settings.first()
-        if (!settings.alertsEnabled || settings.alertCategories.isEmpty()) return Result.success()
+        if (!settings.alertsEnabled || (settings.alertCategories.isEmpty() && !(settings.gardenEnabled && settings.gardenFrostAlerts))) return Result.success()
         // Respect the user's satellite settings for background checks.
         if (!isAllowed(SatelliteFeature.BACKGROUND_ALERTS, settings, container.connectivity.current())) return Result.success()
 
@@ -56,7 +56,10 @@ class AlertCheckWorker(appContext: Context, params: WorkerParameters) : Coroutin
                 failures++
                 continue
             }
-            val (items, updated) = tracker.select(location.id, alerts, settings.alertCategories, state, Instant.now())
+            val gardenFrost = settings.gardenEnabled && settings.gardenFrostAlerts
+            val (items, updated) = tracker.select(location.id, alerts, settings.alertCategories, state, Instant.now()) { alert ->
+                gardenFrost && (alert.event.contains("Frost", ignoreCase = true) || alert.event.contains("Freeze", ignoreCase = true))
+            }
             state = updated
             toNotify += items
             container.weatherCache.updateAlerts(location.id, alerts)

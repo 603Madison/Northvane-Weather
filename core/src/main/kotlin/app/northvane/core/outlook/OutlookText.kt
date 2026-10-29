@@ -76,7 +76,40 @@ object OutlookText {
             Kind.ALLERGY_THUNDERSTORM -> "Thunderstorms with high pollen can trigger asthma: keep your inhaler handy"
             Kind.ALLERGY_AIR -> "Air quality is unhealthy for sensitive groups (AQI ${v?.roundToInt()}): limit hard outdoor exertion"
             Kind.ALLERGY_QUIET -> "A quiet day for your allergies"
+            Kind.WINTER_GEAR -> "Winter kit: insulated layers, spare gloves and hat, headlamp, a thermos, and tell someone your plan"
+            Kind.POWDER_DAY -> "Powder day: about ${f.snow(v)} of new snow"
+            Kind.ICY_SURFACES -> "Freezing rain or refreeze: firm, icy surfaces. Sharp edges and traction help"
+            Kind.LIFT_HOLDS -> "Gusts to ${f.windSpeed(v)}: upper lifts may go on wind hold"
+            Kind.THIN_COVER -> "Natural snow is thin (about ${f.snow(v)} here): expect limited terrain except where there's snowmaking"
+            Kind.CHECK_SNOW_REPORT -> "Check the mountain's snow report for base depth and open trails"
+            Kind.SPRING_SNOW -> "Warm temperatures: soft, heavy snow by afternoon"
+            Kind.RAIN_ON_SNOW -> "Rain on the snowpack: slushy now, icy when it refreezes"
+            Kind.KICK_WAX -> kickWax(v, f)
+            Kind.BREAK_TRAIL -> "Fresh snow (about ${f.snow(v)}): expect to break trail, which is slow going"
+            Kind.TRAIL_REPORT -> "Check local club and trail-association reports for grooming and closures"
+            Kind.ICE_CHECK -> "Estimated lake ice about ${v?.roundToInt() ?: "?"}\". Always check thickness yourself: 4\" of clear ice to walk, 5–7\" for a snowmobile"
+            Kind.ICE_WEAKENING -> "Thaw or rain weakens ice, especially near inlets, pressure ridges and shorelines"
+            Kind.HAND_WARMERS -> "Pack hand and toe warmers and cover exposed skin"
+            Kind.COLD_WATER_SWIM -> "Northern New England water stays cold (60s °F on the coast): ease in and watch for cold shock"
+            Kind.LIGHTNING_SWIM -> "Get out of the water at the first thunder and wait 30 minutes after the last"
+            Kind.TRACKING_SNOW -> "Fresh tracking snow"
+            Kind.LEGAL_HOURS -> "Sunrise ${v?.let { java.time.LocalTime.ofSecondOfDay(it.toLong()).withSecond(0) } ?: "--"}: check your state's legal hours and season dates"
+            Kind.MEAT_CARE -> "Warm day: field dress quickly and cool game fast"
+            Kind.QUIET_WIND -> "Calm wind: sounds and scent carry, so move slowly and mind your wind"
+            Kind.SCENT_WIND -> "Wind around ${f.windSpeed(v)}: game stays bedded in cover; hunt the lee side"
         }.let { if (imperial) it else metricize(it) }
+    }
+
+    private fun kickWax(tempC: Double?, f: UnitFormatter): String {
+        val t = tempC ?: return "Pick kick wax for the snow temperature"
+        val wax = when {
+            t <= -10 -> "green (very cold)"
+            t <= -4 -> "blue (cold, dry snow)"
+            t <= 0 -> "purple/violet (around freezing)"
+            t <= 2 -> "red (wet, new snow)"
+            else -> "klister (wet or icy old snow), or skins"
+        }
+        return "Kick wax: $wax for a high near ${f.temperatureWithUnit(t)}"
     }
 
     /** Drop the Fahrenheit-first gear ratings for metric users. */
@@ -114,5 +147,54 @@ object OutlookText {
         3 -> "Moderate"
         4 -> "High"
         else -> "Very high"
+    }
+
+    /**
+     * What to do before a likely power outage, shaped by what's driving it
+     * and how the household heats (from the heating settings, if any).
+     */
+    fun outagePrep(risk: app.northvane.core.model.OutageRisk, heating: List<HeatType>): List<String> {
+        val kinds = risk.factors.map { it.kind }.toSet()
+        val winter = app.northvane.core.model.OutageFactor.Kind.ICE in kinds || app.northvane.core.model.OutageFactor.Kind.WET_SNOW in kinds ||
+            app.northvane.core.model.OutageFactor.Kind.SNOW in kinds || app.northvane.core.model.OutageFactor.Kind.FROZEN_GROUND in kinds
+        return buildList {
+            add("Charge phones, power banks and laptops; find flashlights and fresh batteries (skip candles)")
+            add("Fill the car's gas tank and get some cash, since pumps and card readers need power")
+            add("Keep fridge and freezer closed during an outage: food stays safe about 4 hours in the fridge, 24–48 in a full freezer")
+            add("Store drinking water (a gallon per person per day); if you're on a well, fill tubs for flushing")
+            add("Refill prescriptions; plan for any medical devices that need power")
+            if (heating.isNotEmpty()) {
+                val powered = heating.filter { it.needsPower }.map { it.label.substringBefore(" (").lowercase() }
+                val independent = heating.filterNot { it.needsPower }.map { it.label.substringBefore(" (").lowercase() }
+                if (powered.isNotEmpty()) add("Your ${powered.joinToString(" and ")} won't run without power" + if (independent.isNotEmpty()) "; have the ${independent.joinToString(" and ")} ready with fuel inside" else "; plan a warm place to go")
+            } else if (winter) {
+                add("Most furnaces and boilers need electricity: plan a safe backup heat source or a warm place to go")
+            }
+            if (winter) add("Protect pipes: if heat is lost, open cabinet doors and let faucets drip")
+            add("Generators only outdoors, at least 20 feet from doors and windows, and test your CO alarms")
+            add("Stay at least 30 feet from downed lines and report them to your utility (CMP, Versant, Eversource, NHEC, Unitil or Liberty in ME/NH)")
+        }
+    }
+
+    fun heatingTask(t: HeatingTask, f: UnitFormatter): String {
+        val fuel = t.source?.fuel ?: "fuel"
+        return when (t.kind) {
+            HeatingTask.Kind.SERVICE_SYSTEM -> "Book your annual heating service before the fall rush"
+            HeatingTask.Kind.CHIMNEY_SWEEP -> "Have the chimney or flue inspected and swept before the first fire"
+            HeatingTask.Kind.CO_DETECTORS -> "Test smoke and carbon monoxide alarms and replace batteries"
+            HeatingTask.Kind.FILL_TANK_PREBUY -> "Fill the $fuel tank or lock in a pre-buy price now. Late summer is usually cheaper than mid-winter"
+            HeatingTask.Kind.CHECK_TANK_COLD_SNAP -> "Cold snap ahead (low near ${f.temperatureWithUnit(t.value)}): check your $fuel level and order if under half a tank, before deliveries back up"
+            HeatingTask.Kind.BUY_SEASONED_WOOD -> "Buy seasoned firewood now if you need it (under 20% moisture). Green wood bought in fall won't burn well this winter"
+            HeatingTask.Kind.SPLIT_STACK_NEXT_YEAR -> "Split and stack next winter's wood now: off the ground, top covered, sides open. It needs 6–12 months to season"
+            HeatingTask.Kind.MOVE_WOOD_IN -> "Bring a few days of firewood under cover near the stove before the cold"
+            HeatingTask.Kind.BUY_PELLETS -> "Buy pellets for the season while supply is good and prices are lower"
+            HeatingTask.Kind.HEAT_PUMP_FILTERS -> "Clean the heat pump filters and clear plants and debris from the outdoor unit"
+            HeatingTask.Kind.CLEAR_OUTDOOR_UNIT -> "Snow coming: keep the heat pump's outdoor unit clear of snow and ice"
+            HeatingTask.Kind.BELOW_HEAT_PUMP_RANGE -> "Low near ${f.temperatureWithUnit(t.value)}: below the range you set for the heat pump, so switch to your backup"
+            HeatingTask.Kind.PROTECT_PIPES -> "Near or below 0°F (${f.temperatureWithUnit(t.value)}): protect pipes on outside walls by opening cabinets and letting faucets drip"
+            HeatingTask.Kind.END_OF_SEASON -> "End of heating season: clean the stove, schedule service, and plan next winter's fuel"
+            HeatingTask.Kind.MONITOR_FUEL -> "Mid-winter check: read your $fuel gauge and keep at least a quarter tank"
+            HeatingTask.Kind.NO_SOURCES -> "Add how you heat in Settings › Heating to get advice for your system"
+        }
     }
 }

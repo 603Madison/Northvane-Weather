@@ -13,6 +13,7 @@ class NorthvaneApp : Application() {
         container = AppContainer(this)
         container.connectivity.start()
         AlertNotifier.createChannels(this)
+        app.northvane.weather.work.LaundryWatchWorker.createChannel(this)
         container.applicationScope.launch { container.alertScheduler.sync() }
     }
 }

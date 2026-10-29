@@ -138,7 +138,12 @@ class WeatherRepository(
         val today = now.atZone(zone ?: ZoneId.systemDefault()).toLocalDate()
         val historyJob = acis?.takeIf { wants(Section.HISTORY) }?.let { client ->
             // Late winter to spring needs the whole winter's freeze for the thaw model.
-            val days = if (today.monthValue in 2..5) 150 else AcisClient.DEFAULT_DAYS + 15
+            val sinceMarch = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.of(today.year, 3, 1), today).toInt() + 1
+            val days = when (today.monthValue) {
+                in 2..5 -> 150
+                in 6..10 -> maxOf(AcisClient.DEFAULT_DAYS + 15, sinceMarch) // growing degree days since March
+                else -> AcisClient.DEFAULT_DAYS + 15
+            }
             async { attempt { client.history(point, today, days, includeSnowDepth = today.monthValue !in 6..9, now = now) } }
         }
         val airJob = if (wants(Section.AIR_QUALITY) && (airNow != null || epaUv != null || openMeteoAir != null)) {

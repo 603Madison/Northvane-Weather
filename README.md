@@ -41,6 +41,9 @@ built into the app, and there are no accounts, ads or analytics.
 </p>
 <p>
 <img src="docs/screenshots/air_uv_allergy.png" width="250" alt="Air quality, UV and allergy score">
+<img src="docs/screenshots/garden_heating.png" width="250" alt="Garden planting, harvest and heating cards">
+<img src="docs/screenshots/outage_prepare.png" width="250" alt="Outage preparation steps">
+<img src="docs/screenshots/drying.png" width="250" alt="Clothes drying">
 <img src="docs/screenshots/traffic_list.png" width="250" alt="Traffic events near Portland, ME">
 <img src="docs/screenshots/themes_screen.png" width="250" alt="Theme picker">
 </p>
@@ -85,9 +88,10 @@ setups are especially welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
   (~10 KB compressed) adds gusts, wind direction, rain/snow/ice amounts, sky
   cover, humidity, feels-like temperature and thunder probability to every
   hour and day.
-- **Hourly** view: one tall card with every number for the next 36 hours:
-  feels-like, precipitation chance (with a bar) and amount, wind direction and
-  speed, gusts, humidity, dew point and cloud cover.
+- **Hourly** view: temperature and precipitation chance at a glance. Tap the
+  card for every number for the next 36 hours: feels-like, precipitation
+  amount, wind direction and speed, gusts, humidity, dew point and cloud
+  cover. It remembers whether you left it open.
 - **Daily** view: tap a day for its wind and gusts, totals, humidity range,
   cloud cover, thunder chance and the outage outlook. If detailed data is turned
   off for satellite, amounts are read from the NWS forecast text instead.
@@ -97,13 +101,57 @@ setups are especially welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ### Outdoor outlook (optional)
 Daily 0–100 scores, with reasons and practical recommendations, for **hiking**,
 **camping** (overnight), **off-roading**, **mountain biking**, **paddling** and
-**stargazing** (overnight; uses cloud cover and the moon's phase). Each
+**stargazing** (overnight; uses cloud cover and the moon's phase). Seasonal
+activities appear only when they make sense:
+- **Winter, with confirmed snow on the ground** (nearest reported snow depth):
+  downhill skiing (powder days, lift wind holds, rain-on-snow), cross-country
+  skiing (kick-wax suggestions), snowshoeing, snowmobiling.
+- **Ice fishing**, once lakes have likely frozen solid (estimated ice
+  thickness, with "check it yourself" guidance).
+- **Swimming** in summer, and **hunting** in fall and spring turkey season.
+- In winter, hiking, camping and biking become **winter hiking**, **winter
+  camping** and **fat biking**, with winter gear tips. Paddling and
+  off-roading hide while there's snowpack. Each
 activity weighs what matters to it: heat and humidity, cold and wind chill,
 rain and thunderstorms, gusts (and stronger summit winds), snow and ice, trail
 mud and active warnings. Tips include sleeping-bag ratings for the overnight
 low, rainfly and guyline advice, microspikes or snowshoes, early starts before
 afternoon storms, and New England seasonal notes (black flies, ticks, hunting
 season blaze orange, short days).
+
+### Garden (optional, off by default)
+Pick what you're growing and how you'll start it, and Northvane builds a
+schedule from your **local frost dates**. These are computed once from 30 years of NOAA
+daily lows for your spot (median and 1-in-10 dates):
+- **Planting card** (only in planting season): start seeds indoors, harden
+  off, plant out or sow. When a window opens, it checks the forecast for the
+  first day whose coming nights stay above that crop's frost limit, and holds
+  off for cold soil (estimated from recent temperatures). Mark crops planted
+  as you go.
+- **Harvest card** (only in harvest season): ready dates from days-to-maturity,
+  "pick before Thursday's frost" for tender crops, "cover plants tonight",
+  and "frost will sweeten your kale". Garlic gets a fall planting reminder.
+- Optional extras: frost & freeze notifications (NWS Frost Advisories and
+  Freeze Warnings even if you've turned advisories off), watering advice
+  (past week's rain vs. about an inch a week), soil readiness, and growing
+  degree days for farmers.
+
+### Clothes drying
+The best window for line-drying in the next two days (warm dry air, a
+breeze, sun, no rain) with an estimated drying time, plus a 7-day ranking.
+It never recommends drying below freezing. Tap **My laundry is out** and the
+app checks the hourly forecast every 20 minutes in the background, notifying
+you before rain, thunder or evening dew (for up to 12 hours).
+
+### Heating season (optional, off by default)
+Tell the app how you heat and when you use each source, for example heat pump
+above 15°F, wood stove below 30°F, oil below 0°F. It shows which system to
+run each day this week and the heating demand (degree days). It also lists
+chores timed to your climate:
+- Fuel: pre-buy oil or propane in late summer, check the tank before a cold snap.
+- Wood: buy seasoned firewood, and split and stack next winter's wood in spring.
+- Pellets, plus service and chimney visits.
+- Pipe protection and clearing snow from heat-pump units.
 
 ### Allergy score (optional)
 Tell the app what you're allergic to, for example birch (severe), grass (mild)
@@ -118,7 +166,8 @@ and outdoor mold, and it gives each day a personal 0–100 score:
 - Weather adjusts it: steady rain washes pollen out, dry gusty wind spreads it,
   and thunderstorms during high grass/tree pollen bring an asthma warning.
 Tips scale with the score: take medicine early, keep windows closed, shower
-after being outside, wear a mask for yard work.
+after being outside, wear a mask for yard work. The allergy forecast appears
+inside the pollen card when pollen data is available.
 
 ### Air quality and UV index (optional)
 - **AQI** from **EPA AirNow** (government monitors and state/local forecasts)
@@ -170,6 +219,10 @@ New England's tree-lined overhead lines. Each day lists the factors behind it:
   especially early or late-season snow on leafed trees (October 2011, October 2020).
 - **Saturated ground** (1"+ of rain) combined with wind, **thunderstorms**, heat,
   and active **NWS alerts** (High Wind, Ice Storm, Winter Storm, and others).
+
+When the risk is High or Very high, tap the panel for preparation steps. They
+are tailored to what's driving the risk and to whether your heat sources need
+electricity.
 
 This is not a utility forecast. Turn it on or off in Settings › Forecast extras.
 
@@ -305,6 +358,9 @@ docs/   Security and privacy notes.
 - **Settings › Appearance**: theme (static, weather or custom), System / Light / Dark, wallpaper colors, units.
 - **Settings › Forecast extras › My allergies**: your allergens and sensitivity.
 - **Settings › Traffic**: tab on/off, radius, live speed layer.
+- **Settings › Home & garden**: clothes drying, garden (with *My garden*: crops,
+  methods, planted dates, and garden extras) and heating (with *My heating*:
+  sources and temperature ranges).
 
 ## Data sources and attribution
 

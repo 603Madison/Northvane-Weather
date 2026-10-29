@@ -9,6 +9,7 @@ import app.northvane.core.air.OpenMeteoAirClient
 import app.northvane.core.traffic.TrafficClient
 import app.northvane.core.traffic.TrafficService
 import app.northvane.weather.data.ThemeBackgroundStore
+import app.northvane.weather.data.ClimateStore
 import app.northvane.core.nws.NwsClient
 import app.northvane.core.pollen.PollenClient
 import app.northvane.core.owm.OwmClient
@@ -33,7 +34,7 @@ import okhttp3.OkHttpClient
 import java.io.File
 
 /** Manual dependency container; one instance per process, owned by [NorthvaneApp]. */
-class AppContainer(private val app: Application) {
+class AppContainer(val app: Application) {
     val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settings = SettingsRepository(app)
@@ -63,9 +64,11 @@ class AppContainer(private val app: Application) {
     val trafficClient: TrafficClient by lazy { TrafficClient(http) }
     val traffic: TrafficService by lazy { TrafficService(trafficClient) }
     val themeBackground = ThemeBackgroundStore(app)
+    val acis: AcisClient by lazy { AcisClient(http) }
+    val climate: ClimateStore by lazy { ClimateStore(app, acis) }
 
     val repository: WeatherRepository by lazy {
-        WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = AcisClient(http), pollen = pollen,
+        WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = acis, pollen = pollen,
             airNow = airNow, epaUv = EpaUvClient(http), openMeteoAir = OpenMeteoAirClient(http),
         )
     }

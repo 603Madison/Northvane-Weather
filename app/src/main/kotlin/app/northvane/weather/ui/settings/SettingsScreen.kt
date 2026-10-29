@@ -76,6 +76,8 @@ fun SettingsScreen(
     onOpenSources: () -> Unit,
     onOpenAllergies: () -> Unit = {},
     onOpenThemes: () -> Unit = {},
+    onOpenGarden: () -> Unit = {},
+    onOpenHeating: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -284,7 +286,12 @@ fun SettingsScreen(
                         ) {
                             Checkbox(checked = checked, onCheckedChange = { on -> update { setActivity(activity, on) } })
                             Spacer(Modifier.width(4.dp))
-                            Text(activity.label + if (activity.overnight) " (overnight)" else "", style = MaterialTheme.typography.bodyLarge)
+                            Column {
+                                Text(activity.label + if (activity.overnight) " (overnight)" else "", style = MaterialTheme.typography.bodyLarge)
+                                activitySeason(activity)?.let {
+                                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
                         }
                     }
                 }
@@ -330,6 +337,41 @@ fun SettingsScreen(
                     checked = s.pollenEnabled,
                     onCheckedChange = { enabled -> update { setPollen(enabled) } },
                 )
+            }
+
+            SectionCard("Home & garden") {
+                LabeledSwitch(
+                    title = "Clothes drying",
+                    subtitle = "Best hours to line-dry laundry, and a rain warning while it's out (never below freezing)",
+                    checked = s.dryingEnabled,
+                    onCheckedChange = { enabled -> update { setDrying(enabled) } },
+                )
+                LabeledSwitch(
+                    title = "Garden",
+                    subtitle = "Planting and harvest schedule for what you grow, from local frost dates and the forecast",
+                    checked = s.gardenEnabled,
+                    onCheckedChange = { enabled -> updateAlerts { setGarden(enabled) } },
+                )
+                if (s.gardenEnabled) {
+                    NavRow(
+                        "My garden",
+                        if (s.gardenPlan.isEmpty()) "Choose what you're planting" else s.gardenPlan.joinToString(", ") { it.crop.label.substringBefore(" (").lowercase() },
+                        onOpenGarden,
+                    )
+                }
+                LabeledSwitch(
+                    title = "Heating season",
+                    subtitle = "Which of your heat sources to run, and when to buy fuel, stack wood or book service",
+                    checked = s.heatingEnabled,
+                    onCheckedChange = { enabled -> update { setHeating(enabled) } },
+                )
+                if (s.heatingEnabled) {
+                    NavRow(
+                        "My heating",
+                        if (s.heatSources.isEmpty()) "Add how you heat your home" else s.heatSources.joinToString(", ") { it.label.substringBefore(" (").lowercase() },
+                        onOpenHeating,
+                    )
+                }
             }
 
             SectionCard("Traffic") {
@@ -507,6 +549,17 @@ fun SettingsScreen(
             }
         }
     }
+}
+
+private fun activitySeason(a: Activity): String? = when (a) {
+    Activity.SKIING -> "Winter, with reported snow on the ground"
+    Activity.XC_SKIING, Activity.SNOWSHOEING -> "Winter, with 4\"+ of reported snow"
+    Activity.SNOWMOBILING -> "Winter, with 8\"+ of reported snow"
+    Activity.ICE_FISHING -> "Winter, once lakes have likely frozen solid"
+    Activity.SWIMMING -> "Summer (June to mid-September)"
+    Activity.HUNTING -> "Fall and spring turkey seasons"
+    Activity.PADDLING, Activity.OFF_ROADING -> "Hidden while there's snowpack"
+    else -> null
 }
 
 @Composable

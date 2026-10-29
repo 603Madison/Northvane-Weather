@@ -109,6 +109,11 @@ weather services described below.
   with the user's key (the key is part of the tile URL by TomTom's design).
   Traffic requests don't include your coordinates except TomTom tile
   addresses, which reveal the map area being viewed.
+- Garden and heating frost dates: one download of 30 years of daily lows
+  from data.rcc-acis.org per place (~40 KB), cached on the device for a year,
+  and only when those features are on.
+- While "laundry is out", a WorkManager job requests only the hourly forecast
+  from weather.gov every 20 minutes, for at most 12 hours.
 - The custom theme photo is copied into `noBackupFilesDir` after decoding and
   re-encoding, which strips EXIF metadata such as GPS position. The app uses
   the system photo picker and holds no media permission.

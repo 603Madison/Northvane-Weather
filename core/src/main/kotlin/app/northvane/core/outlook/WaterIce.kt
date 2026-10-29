@@ -18,6 +18,12 @@ object WaterIce {
     const val FROZEN = 20.0
     private const val CAP = 200.0
 
+    /**
+     * Rough lake-ice thickness (inches) from the freezing balance, using
+     * Stefan's law with a coefficient typical of snow-covered lake ice.
+     */
+    fun thicknessInches(balance: Double): Double = 1.5 * kotlin.math.sqrt(balance.coerceAtLeast(0.0)) / 2.54
+
     fun forecast(history: WeatherHistory?, days: List<DailyForecast>, today: LocalDate): Map<LocalDate, Double> {
         val observed = history?.days.orEmpty().filter { it.date.isBefore(today) }.sortedBy { it.date }
             .map { Triple(it.date, it.highC, it.lowC) }

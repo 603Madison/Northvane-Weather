@@ -240,69 +240,55 @@ private fun UvBars(uv: UvForecast, now: Instant, time: TimeFormat) {
     }
 }
 
-// --- Allergies ---
+// --- Allergies (shown inside the pollen card) ---
 
 @Composable
-internal fun AllergySection(
+internal fun AllergyBlock(
     days: List<AllergyDay>,
     hasProfile: Boolean,
-    pollenKeySet: Boolean,
     f: UnitFormatter,
     time: TimeFormat,
     onEditAllergies: () -> Unit,
 ) {
-    Column {
-        SectionTitle("My allergies")
-        AirCard {
-            val today = days.firstOrNull()
-            if (!hasProfile || today == null) {
-                Small("Tell Northvane what you're allergic to (birch, grass, ragweed, mold…) to get a daily score for how your allergies will be.")
-                TextButton(onClick = onEditAllergies) { Text("Choose my allergies") }
-                return@AirCard
+    Text("Your allergies", style = MaterialTheme.typography.titleSmall)
+    val today = days.firstOrNull()
+    if (!hasProfile || today == null) {
+        Small("Tell Northvane what you're allergic to (birch, grass, ragweed, mold…) for a daily score of how your allergies will be.")
+        TextButton(onClick = onEditAllergies) { Text("Choose my allergies") }
+        return
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+        ScoreRing(today.score, allergyColor(today.level), Modifier.size(52.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("${today.level.label} today", style = MaterialTheme.typography.titleMedium, color = allergyColor(today.level))
+            val drivers = today.drivers.take(3).joinToString(", ") { d ->
+                d.allergen.label + " " + OutlookText.pollenCategory(d.index.roundToInt()).lowercase() + if (d.estimated && d.allergen.typeCode != null) "*" else ""
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                ScoreRing(today.score, allergyColor(today.level), Modifier.size(56.dp))
-                Spacer(Modifier.width(14.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("${today.level.label} today", style = MaterialTheme.typography.titleMedium, color = allergyColor(today.level))
-                    val drivers = today.drivers.take(3).joinToString(", ") { d ->
-                        d.allergen.label + " " + OutlookText.pollenCategory(d.index.roundToInt()).lowercase() + if (d.estimated && d.allergen.typeCode != null) "*" else ""
-                    }
-                    Small(drivers.ifEmpty { "Nothing you react to is in the air" })
-                }
-            }
-            today.tips.take(3).forEach { tip ->
-                Row(Modifier.padding(top = 4.dp)) {
-                    Small("•")
-                    Spacer(Modifier.width(6.dp))
-                    Text(OutlookText.tip(tip, f), style = MaterialTheme.typography.bodySmall)
-                }
-            }
-            if (days.size > 1) {
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth()) {
-                    days.take(5).forEach { d ->
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
-                            Text(time.weekday(d.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(
-                                if (d.pollenKnown) "${d.score}" else "–",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = if (d.pollenKnown) allergyColor(d.level) else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
-            }
-            if (today.drivers.any { it.estimated && it.allergen.typeCode != null }) {
-                Small("* Estimated from overall tree/grass/weed pollen (this plant isn't reported here).", Modifier.padding(top = 8.dp))
-            }
-            if (!today.pollenKnown) {
-                Small(
-                    if (pollenKeySet) "Pollen forecast unavailable right now; pollen allergies aren't counted." else "Add a Google Pollen API key (Data sources) to include pollen allergies.",
-                    Modifier.padding(top = 8.dp),
-                )
-            }
-            TextButton(onClick = onEditAllergies) { Text("Edit my allergies") }
+            Small(drivers.ifEmpty { "Nothing you react to is in the air" })
         }
     }
+    today.tips.take(3).forEach { tip ->
+        Row(Modifier.padding(top = 4.dp)) {
+            Small("•")
+            Spacer(Modifier.width(6.dp))
+            Text(OutlookText.tip(tip, f), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    val known = days.filter { it.pollenKnown }.take(5)
+    if (known.size > 1) {
+        Spacer(Modifier.height(10.dp))
+        Row(Modifier.fillMaxWidth()) {
+            known.forEach { d ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                    Text(time.weekday(d.date), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("${d.score}", style = MaterialTheme.typography.labelLarge, color = allergyColor(d.level))
+                }
+            }
+        }
+    }
+    if (today.drivers.any { it.estimated && it.allergen.typeCode != null }) {
+        Small("* Estimated from overall tree/grass/weed pollen (this plant isn't reported here).", Modifier.padding(top = 8.dp))
+    }
+    TextButton(onClick = onEditAllergies) { Text("Edit my allergies") }
 }

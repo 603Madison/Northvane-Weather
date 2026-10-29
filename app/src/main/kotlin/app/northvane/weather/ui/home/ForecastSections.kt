@@ -48,6 +48,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.northvane.core.model.Activity
+import app.northvane.core.outlook.HeatType
+import app.northvane.core.outlook.OutlookText
 import app.northvane.core.model.DailyForecast
 import app.northvane.core.model.DetailSource
 import app.northvane.core.model.HourlyForecast
@@ -83,9 +85,16 @@ private enum class HourRow(val label: String, val height: Int) {
  * humidity, dew point, cloud cover). Rows without data are left out.
  */
 @Composable
-internal fun HourlySection(hours: List<HourlyForecast>, f: UnitFormatter, time: TimeFormat) {
+internal fun HourlySection(
+    hours: List<HourlyForecast>,
+    f: UnitFormatter,
+    time: TimeFormat,
+    expanded: Boolean = true,
+    onToggle: (Boolean) -> Unit = {},
+) {
     val shown = hours.take(36)
-    val rows = HourRow.entries.filter { r ->
+    val compact = setOf(HourRow.TIME, HourRow.ICON, HourRow.TEMP, HourRow.PRECIP)
+    val rows = HourRow.entries.filter { expanded || it in compact }.filter { r ->
         when (r) {
             HourRow.TIME, HourRow.ICON, HourRow.TEMP, HourRow.PRECIP -> true
             HourRow.FEELS -> shown.any { h -> h.apparentTemperatureC != null && h.temperatureC != null }
@@ -101,10 +110,12 @@ internal fun HourlySection(hours: List<HourlyForecast>, f: UnitFormatter, time: 
     Column {
         SectionTitle("Hourly")
         Card(
+            onClick = { onToggle(!expanded) },
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+            modifier = Modifier.animateContentSize(),
         ) {
-            Row(Modifier.padding(vertical = 10.dp)) {
+            Row(Modifier.padding(top = 10.dp)) {
                 // Row labels, fixed on the left while the hours scroll.
                 Column(Modifier.padding(start = 14.dp, end = 4.dp).width(70.dp)) {
                     rows.forEach { r ->
@@ -121,6 +132,13 @@ internal fun HourlySection(hours: List<HourlyForecast>, f: UnitFormatter, time: 
                     }
                 }
             }
+            Text(
+                if (expanded) "Tap for less" else "Tap for wind, humidity, clouds and more",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp),
+            )
         }
     }
 }
@@ -213,6 +231,7 @@ internal fun DailySection(
     showOutage: Boolean,
     activities: Set<Activity> = emptySet(),
     showMud: Boolean = false,
+    heatTypes: List<HeatType> = emptyList(),
 ) {
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     val temps = days.flatMap { listOfNotNull(it.lowC, it.highC) }
@@ -276,10 +295,6 @@ internal fun DailySection(
                         if (isOpen) {
                             Spacer(Modifier.height(12.dp))
                             DayDetails(day, f)
-                            outage?.let {
-                                Spacer(Modifier.height(10.dp))
-                                OutagePanel(it, f)
-                            }
                             val mud = day.mud?.takeIf { showMud }
                             if (mud != null) {
                                 Spacer(Modifier.height(10.dp))
@@ -296,6 +311,10 @@ internal fun DailySection(
                             if (scores.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
                                 ActivityStrip(scores)
+                            }
+                            outage?.let {
+                                Spacer(Modifier.height(10.dp))
+                                OutagePanel(it, f, heatTypes)
                             }
                             Spacer(Modifier.height(10.dp))
                             day.dayDetail?.let { DetailParagraph("Day", it) }
@@ -382,10 +401,18 @@ internal fun describe(factor: OutageFactor, f: UnitFormatter): String = when (fa
 }
 
 @Composable
-private fun OutagePanel(risk: OutageRisk, f: UnitFormatter) {
+private fun OutagePanel(risk: OutageRisk, f: UnitFormatter, heatTypes: List<HeatType>) {
     val color = outageColor(risk.level)
-    Surface(shape = RoundedCornerShape(14.dp), color = color.copy(alpha = 0.12f), modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp)) {
+    val canPrepare = risk.level >= OutageLevel.HIGH
+    var showPrep by rememberSaveable(risk) { mutableStateOf(false) }
+    Surface(
+        onClick = { if (canPrepare) showPrep = !showPrep },
+        enabled = canPrepare,
+        shape = RoundedCornerShape(14.dp),
+        color = color.copy(alpha = 0.12f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(12.dp).animateContentSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 PowerGlyph(color, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
@@ -398,6 +425,19 @@ private fun OutagePanel(risk: OutageRisk, f: UnitFormatter) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(top = 4.dp),
             )
+            if (canPrepare && !showPrep) {
+                Text("Tap for how to prepare", style = MaterialTheme.typography.labelMedium, color = color, modifier = Modifier.padding(top = 6.dp))
+            }
+            if (showPrep) {
+                Text("Get ready for an outage", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = 10.dp, bottom = 4.dp))
+                OutlookText.outagePrep(risk, heatTypes).forEach { step ->
+                    Row(Modifier.padding(vertical = 2.dp)) {
+                        Text("•", style = MaterialTheme.typography.bodySmall)
+                        Spacer(Modifier.width(6.dp))
+                        Text(step, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
         }
     }
 }
