@@ -35,6 +35,7 @@
         <domain includeSubdomains="true">ne-compass.com</domain>
         <domain includeSubdomains="true">newengland511.org</domain>
         <domain includeSubdomains="true">tomtom.com</domain>
+        <domain includeSubdomains="true">weather.gc.ca</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

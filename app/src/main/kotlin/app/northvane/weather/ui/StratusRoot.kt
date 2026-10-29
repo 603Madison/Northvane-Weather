@@ -20,6 +20,13 @@ import app.northvane.weather.ui.settings.HeatingScreen
 import app.northvane.weather.ui.theme.LocalBackdrop
 import app.northvane.weather.ui.theme.LocalIsDark
 import app.northvane.weather.ui.traffic.TrafficScreen
+import app.northvane.weather.ui.outlook.OutlookScreen
+import app.northvane.weather.ui.outlook.hasOutlookFeatures
+import app.northvane.weather.ui.components.StormChaser
+import app.northvane.weather.data.SatelliteFeature
+import app.northvane.core.model.Section
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.padding
@@ -56,6 +63,8 @@ import app.northvane.weather.ui.locations.LocationsScreen
 import app.northvane.weather.ui.radar.RadarScreen
 import app.northvane.weather.ui.settings.DataSourcesScreen
 import app.northvane.weather.ui.settings.SettingsScreen
+import app.northvane.weather.ui.settings.SettingsNav
+import app.northvane.weather.ui.settings.SettingsPage
 import kotlinx.coroutines.flow.StateFlow
 
 sealed interface NavRequest {
@@ -73,6 +82,7 @@ object Routes {
     const val ALLERGIES = "allergies"
     const val THEMES = "themes"
     const val GARDEN = "garden"
+    const val OUTLOOK = "outlook"
     const val HEATING = "heating"
 }
 
@@ -81,6 +91,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val tabs = listOf(
     Tab(Routes.TODAY, "Today", Icons.Filled.Home),
     Tab(Routes.RADAR, "Radar", NorthvaneIcons.Radar),
+    Tab(Routes.OUTLOOK, "Outlook", NorthvaneIcons.Pollen),
     Tab(Routes.TRAFFIC, "Traffic", NorthvaneIcons.Traffic),
     Tab(Routes.ALERTS, "Alerts", Icons.Filled.Warning),
 )
@@ -114,6 +125,18 @@ fun NorthvaneRoot(
             setHourlyExpanded = vm::setHourlyExpanded,
             laundryOut = vm::laundryOut,
             markPlanted = vm::markPlanted,
+            refreshSummary = { vm.summarize() },
+        )
+    }
+
+    val settingsNav = remember(navController) {
+        SettingsNav(
+            openPage = { navController.navigate("${Routes.SETTINGS}/${it.route}") },
+            openSources = { navController.navigate(Routes.SOURCES) },
+            openAllergies = { navController.navigate(Routes.ALLERGIES) },
+            openThemes = { navController.navigate(Routes.THEMES) },
+            openGarden = { navController.navigate(Routes.GARDEN) },
+            openHeating = { navController.navigate(Routes.HEATING) },
         )
     }
 
@@ -128,7 +151,30 @@ fun NorthvaneRoot(
         }
     }
 
-    val visibleTabs = if (state.settings.trafficEnabled) tabs else tabs.filterNot { it.route == Routes.TRAFFIC }
+    // On satellite, tabs whose data can't be downloaded and has nothing recent cached disappear
+    // (unless the user chose to see stale data).
+    val settings = state.settings
+    val hideStale = state.liteMode && !settings.showStaleData
+    val trafficAge = remember(state.selected?.id, state.network, hideStale) {
+        state.selected?.let { container.trafficCache.age(it.id) }
+    }
+    val visibleTabs = tabs.filter { tab ->
+        when (tab.route) {
+            Routes.TRAFFIC -> settings.trafficEnabled && !(hideStale && SatelliteFeature.TRAFFIC !in settings.satelliteFeatures &&
+                (trafficAge == null || trafficAge > MainUiState.STALE_AFTER))
+            Routes.RADAR -> !(hideStale && SatelliteFeature.RADAR !in settings.satelliteFeatures)
+            Routes.ALERTS -> !(hideStale && SatelliteFeature.ALERTS !in settings.satelliteFeatures && !state.shows(Section.ALERTS))
+            Routes.OUTLOOK -> settings.hasOutlookFeatures()
+            else -> true
+        }
+    }
+    // If the open tab disappears (e.g. satellite connects), go back to Today.
+    LaunchedEffect(visibleTabs.map { it.route }, route) {
+        if (route in tabs.map { it.route } && visibleTabs.none { it.route == route }) navController.navigateToTab(Routes.TODAY)
+    }
+    // Easter egg: tap Radar six times quickly.
+    val radarTaps = remember { ArrayDeque<Long>() }
+    var stormChaser by remember { mutableStateOf(false) }
     ThemeBackdrop(container, state.settings.customPhotoVersion)
     Scaffold(
         containerColor = Color.Transparent,
@@ -139,7 +185,18 @@ fun NorthvaneRoot(
                     visibleTabs.forEach { tab ->
                         NavigationBarItem(
                             selected = route == tab.route,
-                            onClick = { navController.navigateToTab(tab.route) },
+                            onClick = {
+                                if (tab.route == Routes.RADAR) {
+                                    val now = System.currentTimeMillis()
+                                    radarTaps.addLast(now)
+                                    while (radarTaps.isNotEmpty() && now - radarTaps.first() > 3_000) radarTaps.removeFirst()
+                                    if (radarTaps.size >= 6) {
+                                        radarTaps.clear()
+                                        stormChaser = true
+                                    }
+                                }
+                                navController.navigateToTab(tab.route)
+                            },
                             icon = {
                                 val count = if (tab.route == Routes.ALERTS) state.snapshot?.alerts?.size ?: 0 else 0
                                 BadgedBox(badge = { if (count > 0) Badge { Text("$count") } }) {
@@ -173,6 +230,15 @@ fun NorthvaneRoot(
             composable(Routes.RADAR) {
                 RadarScreen(state = state, container = container, onOpenSettings = { navController.navigate(Routes.SETTINGS) })
             }
+            composable(Routes.OUTLOOK) {
+                OutlookScreen(
+                    state = state,
+                    onOpenSettings = { navController.navigate("${Routes.SETTINGS}/${SettingsPage.OUTLOOK.route}") },
+                    onOpenHeating = { navController.navigate(Routes.HEATING) },
+                    onLaundry = vm::laundryOut,
+                    onMarkPlanted = vm::markPlanted,
+                )
+            }
             composable(Routes.TRAFFIC) {
                 TrafficScreen(state = state, container = container, onOpenSettings = { navController.navigate(Routes.SETTINGS) })
             }
@@ -199,16 +265,11 @@ fun NorthvaneRoot(
                 LocationsScreen(state = state, vm = vm, container = container, onBack = { navController.popBackStack() })
             }
             composable(Routes.SETTINGS) {
-                SettingsScreen(
-                    state = state,
-                    container = container,
-                    onBack = { navController.popBackStack() },
-                    onOpenSources = { navController.navigate(Routes.SOURCES) },
-                    onOpenAllergies = { navController.navigate(Routes.ALLERGIES) },
-                    onOpenThemes = { navController.navigate(Routes.THEMES) },
-                    onOpenGarden = { navController.navigate(Routes.GARDEN) },
-                    onOpenHeating = { navController.navigate(Routes.HEATING) },
-                )
+                SettingsScreen(state, container, onBack = { navController.popBackStack() }, nav = settingsNav)
+            }
+            composable("${Routes.SETTINGS}/{page}") { entry ->
+                val page = SettingsPage.entries.firstOrNull { it.route == entry.arguments?.getString("page") }
+                SettingsScreen(state, container, onBack = { navController.popBackStack() }, nav = settingsNav, page = page)
             }
             composable(Routes.SOURCES) {
                 DataSourcesScreen(
@@ -220,6 +281,7 @@ fun NorthvaneRoot(
             }
         }
     }
+    if (stormChaser) StormChaser(onDone = { stormChaser = false })
 }
 
 /**

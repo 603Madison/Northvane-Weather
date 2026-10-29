@@ -20,6 +20,7 @@ enum class DataSource(val displayName: String) {
     AIRNOW("EPA AirNow"),
     EPA_UV("EPA UV Index"),
     OPEN_METEO("Open-Meteo"),
+    ECCC("Environment and Climate Change Canada"),
 }
 
 @Serializable
@@ -257,7 +258,12 @@ data class WeatherSnapshot(
     val elevationM: Double? = null,
     val airQuality: AirQuality? = null,
     val uv: UvForecast? = null,
+    /** When each section's data was last downloaded (for hiding stale data on satellite). */
+    val sectionTimes: Map<Section, @Serializable(InstantSerializer::class) Instant> = emptyMap(),
 ) {
+    /** Age of a section's data, or null if it was never downloaded. */
+    fun ageOf(section: Section, now: Instant): java.time.Duration? = sectionTimes[section]?.let { java.time.Duration.between(it, now) }
+
     /** True while an NWS warning (not a watch, advisory or statement) is in effect. */
     fun hasActiveWarning(now: Instant): Boolean = alerts.any { a ->
         a.category == AlertCategory.WARNING && (a.ends ?: a.expires)?.isAfter(now) != false

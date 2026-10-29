@@ -44,6 +44,7 @@ import app.northvane.core.garden.SoilState
 import app.northvane.core.garden.StepStatus
 import app.northvane.core.garden.WateringAction
 import app.northvane.core.garden.Crop
+import app.northvane.core.garden.GardenAdvisor
 import app.northvane.core.model.Units
 import app.northvane.core.outlook.DryingBlocker
 import app.northvane.core.outlook.DryingReport
@@ -80,8 +81,9 @@ private val Neutral = Color(0xFF7A8794)
 
 // --- Garden ---
 
+/** One garden card: each plant with its current planting step and/or harvest outlook. */
 @Composable
-internal fun GardenSection(
+internal fun GardenCard(
     report: GardenReport,
     settings: AppSettings,
     f: UnitFormatter,
@@ -89,57 +91,42 @@ internal fun GardenSection(
     onMarkPlanted: (Crop) -> Unit,
 ) {
     val today = time.today()
-    val showPlanting = settings.gardenPlanting && report.showPlanting
-    val showHarvest = settings.gardenHarvest && report.showHarvest
-    val extrasWanted = report.inGrowingSeason || showPlanting
-    if (!showPlanting && !showHarvest && !extrasWanted) return
+    val plants = GardenAdvisor.plants(report, today, planting = settings.gardenPlanting, harvest = settings.gardenHarvest)
+    if (plants.isEmpty() && !report.inGrowingSeason) return
     val c = report.climate
-    val frostLine = "Last spring frost usually ${time.monthDay(c.lastFrost(today.year))} (1 year in 10: ${time.monthDay(c.lastFrostLate(today.year))}); " +
-        "first fall frost ${time.monthDay(c.firstFrost(today.year))}. From 30 years of NOAA data."
-    var extrasShown = false
-    if (showPlanting) {
-        Column {
-            SectionTitle("Planting")
-            SeasonCard {
-                Note(frostLine)
-                PlantingList(report.planting.filter { it.status != StepStatus.DONE }, f, time, today, onMarkPlanted)
-                GardenExtras(report, settings, f, time)
+    Column {
+        SectionTitle("Garden")
+        SeasonCard {
+            Note(
+                "Last spring frost usually ${time.monthDay(c.lastFrost(today.year))} (1 year in 10: ${time.monthDay(c.lastFrostLate(today.year))}); " +
+                    "first fall frost ${time.monthDay(c.firstFrost(today.year))}. From 30 years of NOAA data.",
+            )
+            var all by rememberSaveable { mutableStateOf(false) }
+            val shown = if (all) plants else plants.take(8)
+            shown.forEach { p ->
+                Column(Modifier.padding(top = 4.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(p.crop.label, style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+                        val step = p.planting
+                        if (step != null && step.step != PlantingStep.START_INDOORS && step.step != PlantingStep.HARDEN_OFF &&
+                            step.status in setOf(StepStatus.NOW, StepStatus.GOOD_DAY, StepStatus.LATE)
+                        ) {
+                            TextButton(onClick = { onMarkPlanted(p.crop) }) { Text("Planted") }
+                        }
+                    }
+                    p.planting?.let { PlantingLine(it, f, time, today) }
+                    p.harvest?.let { HarvestLine(it, f, time) }
+                }
             }
-        }
-        extrasShown = true
-    }
-    if (showHarvest) {
-        if (showPlanting) Spacer(Modifier.height(16.dp))
-        Column {
-            SectionTitle("Harvest")
-            SeasonCard {
-                val rows = report.harvest.filter { it.status != HarvestStatus.FINISHED }
-                rows.forEach { HarvestRow(it, f, time, today) }
-                if (rows.any { it.estimated }) Note("Dates marked ~ are estimated from the recommended planting date. Mark crops planted for exact timing.")
-                if (!extrasShown) GardenExtras(report, settings, f, time)
-            }
-        }
-        extrasShown = true
-    }
-    if (!extrasShown && report.inGrowingSeason) {
-        Column {
-            SectionTitle("Garden")
-            SeasonCard { GardenExtras(report, settings, f, time) }
+            if (plants.size > shown.size) TextButton(onClick = { all = true }) { Text("Show ${plants.size - shown.size} more") }
+            if (plants.any { it.harvest?.estimated == true }) Note("~ Estimated from the recommended planting date; mark crops planted for exact timing.")
+            GardenExtras(report, settings, f, time)
         }
     }
 }
 
 @Composable
-private fun PlantingList(items: List<PlantingAdvice>, f: UnitFormatter, time: TimeFormat, today: LocalDate, onMarkPlanted: (Crop) -> Unit) {
-    var all by rememberSaveable { mutableStateOf(false) }
-    val shown = if (all) items else items.take(6)
-    shown.forEach { a -> PlantingRow(a, f, time, today, onMarkPlanted) }
-    if (items.size > shown.size) TextButton(onClick = { all = true }) { Text("Show ${items.size - shown.size} more") }
-    if (items.isEmpty()) Note("Everything is planted. Nice work!")
-}
-
-@Composable
-private fun PlantingRow(a: PlantingAdvice, f: UnitFormatter, time: TimeFormat, today: LocalDate, onMarkPlanted: (Crop) -> Unit) {
+private fun PlantingLine(a: PlantingAdvice, f: UnitFormatter, time: TimeFormat, today: LocalDate) {
     val (color, detail) = when (a.status) {
         StepStatus.UPCOMING -> Neutral to "Starts ${time.monthDay(a.windowStart)} (${inDays(ChronoUnit.DAYS.between(today, a.windowStart))})"
         StepStatus.NOW -> Good to "Now through ${time.monthDay(a.windowEnd)}"
@@ -160,17 +147,14 @@ private fun PlantingRow(a: PlantingAdvice, f: UnitFormatter, time: TimeFormat, t
         StatusDot(color)
         Spacer(Modifier.width(8.dp))
         Column(Modifier.weight(1f)) {
-            Text("${a.crop.label} · $action", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(action, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Note(detail, color = if (color == Neutral) MaterialTheme.colorScheme.onSurfaceVariant else color)
-        }
-        if (a.step != PlantingStep.START_INDOORS && a.step != PlantingStep.HARDEN_OFF && a.status in setOf(StepStatus.NOW, StepStatus.GOOD_DAY, StepStatus.LATE)) {
-            TextButton(onClick = { onMarkPlanted(a.crop) }) { Text("Planted") }
         }
     }
 }
 
 @Composable
-private fun HarvestRow(h: HarvestAdvice, f: UnitFormatter, time: TimeFormat, today: LocalDate) {
+private fun HarvestLine(h: HarvestAdvice, f: UnitFormatter, time: TimeFormat) {
     val tilde = if (h.estimated) "~" else ""
     val frost = h.frostDate?.let { "${time.dayName(it)} (${f.temperatureWithUnit(h.frostLowC)})" } ?: ""
     val (color, detail) = when (h.status) {
@@ -185,7 +169,7 @@ private fun HarvestRow(h: HarvestAdvice, f: UnitFormatter, time: TimeFormat, tod
         StatusDot(color)
         Spacer(Modifier.width(8.dp))
         Column {
-            Text(h.crop.label, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text("Harvest", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Note(detail, color = if (color == Neutral) MaterialTheme.colorScheme.onSurfaceVariant else color)
         }
     }
@@ -314,7 +298,7 @@ internal fun DryingSection(report: DryingReport, laundryOut: Boolean, f: UnitFor
 // --- Heating ---
 
 @Composable
-internal fun HeatingSection(report: HeatingReport, hasSources: Boolean, f: UnitFormatter, time: TimeFormat, onConfigure: () -> Unit) {
+internal fun HeatingSection(report: HeatingReport, hasSources: Boolean, aggressive: Boolean, f: UnitFormatter, time: TimeFormat, onConfigure: () -> Unit) {
     Column {
         SectionTitle("Heating")
         SeasonCard {
@@ -322,7 +306,15 @@ internal fun HeatingSection(report: HeatingReport, hasSources: Boolean, f: UnitF
             val start = report.typicalStart
             val end = report.typicalEnd
             if (start != null && end != null) Note("Heating season here usually runs ${time.monthDay(start)} to ${time.monthDay(end)}.")
-            if (hasSources && report.phase != HeatingPhase.OFF && report.days.isNotEmpty()) {
+            if (hasSources && report.phase != HeatingPhase.OFF && report.recommended.isNotEmpty() && !aggressive) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Run: ", style = MaterialTheme.typography.bodyLarge)
+                    Text(report.recommended.joinToString(" + ") { shortName(it) }, style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                }
+                report.outlookMeanC?.let { Note("Based on the two-week average of about ${f.temperatureWithUnit(it)} (past week plus forecast), so it won't flip between systems day to day.") }
+                Note("Heating demand this week: ${report.weekHdd.roundToInt()} degree days" + (report.recentHdd?.let { ", last 30 days ${it.roundToInt()}" } ?: ""))
+            }
+            if (hasSources && report.phase != HeatingPhase.OFF && aggressive && report.days.isNotEmpty()) {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     report.days.forEach { d ->
                         Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {

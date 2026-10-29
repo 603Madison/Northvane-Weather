@@ -219,16 +219,48 @@ class HomeAndGardenTest {
     fun heatingPicksSystemsByTheUsersRules() {
         val today = LocalDate.parse("2027-01-12")
         val days = listOf(day(today, 45.0, 30.0), day(today.plusDays(1), 20.0, 2.0), day(today.plusDays(2), 8.0, -8.0))
-        val report = HeatingAdvisor.report(sources, days, null, climate, today)
+        val report = HeatingAdvisor.report(sources, days, null, climate, today, aggressive = true)
         assertEquals(HeatingPhase.PEAK, report.phase)
         assertEquals(listOf("Heat pump (mini-split / air-source)"), report.days[0].sources)
-        assertEquals(listOf("Wood stove / furnace"), report.days[1].sources)
-        assertTrue("Oil furnace / boiler" in report.days[2].sources && "Wood stove / furnace" in report.days[2].sources)
+        assertEquals(listOf("Wood stove / fireplace"), report.days[1].sources)
+        assertTrue("Oil furnace / boiler" in report.days[2].sources && "Wood stove / fireplace" in report.days[2].sources)
         val kinds = report.tasks.map { it.kind }
         assertTrue(HeatingTask.Kind.BELOW_HEAT_PUMP_RANGE in kinds)
         assertTrue(HeatingTask.Kind.CHECK_TANK_COLD_SNAP in kinds)
         assertTrue(HeatingTask.Kind.PROTECT_PIPES in kinds)
         assertTrue(report.weekHdd > 100)
+    }
+
+    @Test
+    fun normalModeFollowsTheMultiWeekAverage() {
+        val today = LocalDate.parse("2026-11-20")
+        // A mild fortnight (averages near 40°F) with one cold night in the forecast.
+        val past = warmHistory("2026-11-20", 38.0, 7)
+        val days = week("2026-11-20", 46.0, 34.0).toMutableList()
+        days[3] = day(days[3].date, 30.0, 10.0)
+        val normal = HeatingAdvisor.report(sources, days, past, climate, today)
+        assertEquals(listOf("Heat pump (mini-split / air-source)"), normal.recommended)
+        assertTrue(normal.days.all { it.sources.isEmpty() && it.nightSources.isEmpty() }, "no daily switching")
+        assertTrue(Units.cToF(normal.outlookMeanC!!) in 30.0..45.0)
+        val aggressive = HeatingAdvisor.report(sources, days, past, climate, today, aggressive = true)
+        assertTrue(aggressive.days[3].nightSources.isNotEmpty() || aggressive.days[3].sources.contains("Wood stove / fireplace"))
+        // Wood boilers and pellet stoves need power; a wood stove doesn't.
+        assertTrue(HeatType.WOOD_BOILER.needsPower && HeatType.PELLETS.needsPower && HeatType.PELLET_BOILER.needsPower && !HeatType.WOOD.needsPower)
+    }
+
+    @Test
+    fun gardenPlantsCombinePlantingAndHarvest() {
+        val plan = listOf(GardenCrop(Crop.TOMATO), GardenCrop(Crop.LETTUCE), GardenCrop(Crop.GARLIC))
+        val may = GardenAdvisor.report(plan, climate, week("2026-05-12", 70.0, 50.0), warmHistory("2026-05-12", 62.0), LocalDate.parse("2026-05-12"))
+        val rows = GardenAdvisor.plants(may, LocalDate.parse("2026-05-12"))
+        val tomato = rows.first { it.crop == Crop.TOMATO }
+        assertEquals(PlantingStep.TRANSPLANT, tomato.planting!!.step)
+        assertNull(tomato.harvest)
+        assertTrue(rows.none { it.crop == Crop.GARLIC }, "garlic isn't relevant in May")
+        val august = GardenAdvisor.report(plan, climate, week("2026-08-01", 82.0, 62.0), null, LocalDate.parse("2026-08-01"))
+        val aug = GardenAdvisor.plants(august, LocalDate.parse("2026-08-01"))
+        assertTrue(aug.first { it.crop == Crop.TOMATO }.harvest != null && aug.first { it.crop == Crop.TOMATO }.planting == null)
+        assertTrue(GardenAdvisor.plants(august, LocalDate.parse("2026-08-01"), harvest = false).none { it.crop == Crop.TOMATO })
     }
 
     @Test

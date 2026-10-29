@@ -70,6 +70,12 @@ import app.northvane.weather.ui.home.HomeActions
 import app.northvane.weather.ui.home.HomeScreen
 import app.northvane.weather.ui.radar.RadarScreen
 import app.northvane.weather.ui.settings.SettingsScreen
+import app.northvane.weather.ui.settings.SettingsNav
+import app.northvane.weather.ui.settings.SettingsPage
+import app.northvane.weather.ui.outlook.OutlookScreen
+import app.northvane.weather.ui.AiUiState
+import app.northvane.weather.data.AiSummary
+import app.northvane.core.eccc.EcccClient
 import app.northvane.weather.ui.theme.NorthvaneTheme
 import org.junit.Rule
 import org.junit.Test
@@ -210,8 +216,7 @@ class ScreenshotTest {
     fun todayFullLight() {
         render(dark = false) { HomeScreen(state(), noActions, {}, {}, {}) }
         save("today_full_light")
-        compose.onAllNodesWithText("Hiking")[0].performClick()
-        save("today_full_light_hiking_open")
+        compose.onAllNodesWithText("Tap for wind, humidity, clouds and more")[0].performClick()
     }
 
     @Test
@@ -399,10 +404,83 @@ class ScreenshotTest {
     }
 
     @Test
-    @Config(qualifiers = "w400dp-h4200dp-xxhdpi")
-    fun settingsLight() {
+    @Config(qualifiers = "w400dp-h1600dp-xxhdpi")
+    fun settingsPages() {
         val container = AppContainer(ApplicationProvider.getApplicationContext())
-        render(dark = false) { SettingsScreen(state(), container, onBack = {}, onOpenSources = {}) }
-        save("settings_light")
+        var page by androidx.compose.runtime.mutableStateOf<SettingsPage?>(null)
+        val st = state()
+        compose.setContent {
+            NorthvaneTheme(darkTheme = false, dynamicColor = false) {
+                Box {
+                    Backdrop()
+                    SettingsScreen(st, container, onBack = {}, nav = SettingsNav(), page = page)
+                }
+            }
+        }
+        save("settings_index")
+        for (p in listOf(SettingsPage.SATELLITE, SettingsPage.OUTLOOK, SettingsPage.TODAY, SettingsPage.AI)) {
+            page = p
+            save("settings_${p.route}")
+        }
+        page = SettingsPage.SATELLITE
+        compose.onAllNodesWithText("Forecast & alerts")[0].performClick()
+        save("settings_satellite_expanded")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h3000dp-xxhdpi")
+    fun outlookTab() {
+        val st = state()
+        val settings = st.settings.copy(mudEnabled = true, dryingEnabled = true)
+        render(dark = false) { OutlookScreen(st.copy(settings = settings), {}, {}, {}, {}) }
+        save("outlook_tab")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1100dp-xxhdpi")
+    fun todayWithAiSummary() {
+        val st = state()
+        val settings = st.settings.copy(aiEnabled = true, aiBaseUrl = "http://192.168.1.20:11434", aiModel = "llama3.2:3b")
+        val summary = AiSummary(
+            "home",
+            "A mild, mostly sunny afternoon in the low 60s with a light west breeze. Clouds thicken Friday and showers are possible " +
+                "by Wednesday, but the weekend looks dry and cooler, with lows near freezing Saturday night.",
+            "llama3.2:3b", Instant.now(), Instant.now().minusSeconds(600),
+        )
+        render(dark = false) { HomeScreen(st.copy(settings = settings, ai = AiUiState(summary)), noActions, {}, {}, {}) }
+        save("today_ai_summary")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1300dp-xxhdpi")
+    fun staleDataHiddenOnSatellite() {
+        val now = Instant.now()
+        val old = now.minusSeconds(20 * 3600)
+        val snap = snapshot().copy(
+            sectionTimes = mapOf(
+                Section.CURRENT_CONDITIONS to now, Section.ALERTS to now, Section.DAILY_FORECAST to now,
+                Section.HOURLY_FORECAST to old, Section.AIR_QUALITY to old,
+            ),
+        )
+        val settings = AppSettings(units = UnitSystem.IMPERIAL, satelliteFeatures = SatelliteFeature.DEFAULTS - SatelliteFeature.HOURLY_FORECAST)
+        render(dark = false) {
+            HomeScreen(state(snap, settings, NetworkStatus(satellite = true, constrained = true), liteMode = true), noActions, {}, {}, {})
+        }
+        save("today_satellite_stale_hidden")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1500dp-xxhdpi")
+    fun canadianForecast() {
+        val f = EcccClient.parse(resource("eccc_nb29.json"), Instant.parse("2026-10-29T20:10:00Z"))
+        val snap = WeatherSnapshot(
+            locationId = "fr", fetchedAt = Instant.now(), timeZoneId = f.zone.id, placeName = f.placeName,
+            current = f.current, hourly = f.hourly, daily = f.daily, alerts = f.alerts, forecastSource = DataSource.ECCC,
+            sunrise = f.sunrise, sunset = f.sunset,
+        )
+        val fred = SavedLocation("fr", "Fredericton, NB", 45.96, -66.64)
+        val st = state(snap, AppSettings(units = UnitSystem.METRIC)).copy(selected = fred, locations = listOf(fred))
+        render(dark = false) { HomeScreen(st, noActions, {}, {}, {}) }
+        save("today_canada_metric")
     }
 }

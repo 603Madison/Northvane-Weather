@@ -3,6 +3,29 @@
 All notable changes to Northvane. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.4.0] - 2026-10-29
+
+### Added
+- **Canada**: forecasts, current conditions, hourly forecasts and public alerts from Environment and Climate Change Canada (MSC GeoMet, free and keyless) for places outside NWS coverage, including background alert notifications.
+- **AI summary** on the Today screen, under current conditions: a short plain-language briefing written by your own **Ollama**, **Open WebUI**, **LibreChat** (Agents API) or **OpenAI-compatible** server from the forecast. Model picker, test button, key stored encrypted, plain HTTP allowed only on the local network and never with a key; at most one summary per forecast download (45 minutes minimum).
+- **Outlook tab**: activity scores, trail mud, garden, clothes drying, heating season and fall foliage moved off the Today screen into their own tab.
+- **Show stale data** (Settings › Satellite & data saver): with satellite limits on, cards and whole tabs (Radar, Traffic, Alerts, Outlook cards) whose data is over 12 hours old, or missing, are hidden unless you turn this on.
+- **Location reordering** with up/down arrows in Locations.
+- **Heating aggressive mode**: switch systems day by day and at night; otherwise one recommendation from the two-week average temperature.
+- **Heating types**: wood stove/fireplace (no power), wood boiler/furnace, pellet stove and pellet boiler/furnace (need power).
+- A few hidden Easter eggs.
+
+### Changed
+- **Settings** reorganized into pages (Appearance, Today screen, Outlook, Alerts, Radar & traffic, Satellite & data saver, Data sources, AI summary, About) with dropdowns; satellite options are grouped (Forecast & alerts, Extras, Maps) with one switch per group and an expandable list.
+- **Garden**: one card listing each plant with its current planting step and harvest outlook, instead of separate planting and harvest cards.
+- **Fall foliage** shows only while leaves are changing.
+- **Pollen** card appears only when a Google Pollen API key is set.
+- **Trail mud** and **clothes drying** are now off by default.
+- Activity scores and trail mud no longer appear in the daily forecast details (they're on the Outlook tab); the outage panel stays.
+
+### Fixed
+- Environment Canada sometimes reports a wind chill on mild days; it's now only used at 10°C or colder.
+
 ## [1.3.0] - 2026-10-29
 
 ### Added

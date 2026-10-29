@@ -83,6 +83,12 @@ fun HeatingScreen(state: MainUiState, container: AppContainer, onBack: () -> Uni
                     checked = s.heatingEnabled,
                     onCheckedChange = { on -> scope.launch { container.settings.setHeating(on) } },
                 )
+                LabeledSwitch(
+                    title = "Aggressive mode",
+                    subtitle = "Switch systems day by day (and at night) as the forecast changes. Off: one recommendation from the two-week average.",
+                    checked = s.heatingAggressive,
+                    onCheckedChange = { on -> scope.launch { container.settings.setHeatingAggressive(on) } },
+                )
             }
             SectionCard("How I heat") {
                 Text(

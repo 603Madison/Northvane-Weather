@@ -17,8 +17,12 @@ enum class HeatType(val label: String, val needsPower: Boolean, val fuel: String
     PROPANE("Propane", true, "propane"),
     NATURAL_GAS("Natural gas", true, null),
     KEROSENE("Kerosene / direct-vent heater", true, "kerosene"),
-    WOOD("Wood stove / furnace", false, "wood"),
+    /** Stored as WOOD for compatibility with 1.3 settings. */
+    WOOD("Wood stove / fireplace", false, "wood"),
+    WOOD_BOILER("Wood boiler / wood furnace", true, "wood"),
+    /** Stored as PELLETS for compatibility with 1.3 settings. */
     PELLETS("Pellet stove", true, "pellets"),
+    PELLET_BOILER("Pellet boiler / pellet furnace", true, "pellets"),
     ELECTRIC("Electric baseboard / resistance", true, null),
 }
 
@@ -74,6 +78,11 @@ data class HeatingTask(val kind: Kind, val source: HeatType? = null, val value: 
 @Serializable
 data class HeatingReport(
     val phase: HeatingPhase,
+    /** Sources that fit the average temperature over the coming weeks (the normal recommendation). */
+    val recommended: List<String> = emptyList(),
+    /** Average temperature over the past week and the forecast week, °C. */
+    val outlookMeanC: Double? = null,
+    /** Day-by-day (and night) sources: only filled in aggressive mode. */
     val days: List<HeatingDay>,
     val tasks: List<HeatingTask>,
     val weekHdd: Double,
@@ -93,7 +102,7 @@ object HeatingAdvisor {
     /** The card is useful from mid-summer prep (fuel pre-buy, wood) through the end of May. */
     fun visible(today: LocalDate, sources: List<HeatSource>): Boolean {
         val md = MonthDay.from(today)
-        val woodSeason = sources.any { it.type == HeatType.WOOD } && today.monthValue in 3..7
+        val woodSeason = sources.any { it.type.fuel == "wood" } && today.monthValue in 3..7
         return md >= MonthDay.of(7, 15) || md <= MonthDay.of(5, 31) || woodSeason
     }
 
@@ -103,6 +112,8 @@ object HeatingAdvisor {
         history: WeatherHistory?,
         climate: FrostClimate?,
         today: LocalDate,
+        /** Switch sources day by day (and at night) instead of following the multi-week average. */
+        aggressive: Boolean = false,
     ): HeatingReport {
         val year = today.year
         // Heating typically starts around the first fall frost and runs until a few weeks after the last spring frost.
@@ -130,31 +141,50 @@ object HeatingAdvisor {
             HeatingDay(d.date, mean, d.lowC, hdd(d.highC, d.lowC), daySources, night)
         }
 
+        // The normal recommendation follows the average over about two weeks (the past week observed plus the
+        // forecast week), so it doesn't flip between systems with each warm afternoon or cold night.
+        val pastMeans = recent.takeLast(7).mapNotNull { d -> if (d.highC != null && d.lowC != null) (d.highC + d.lowC) / 2 else null }
+        val outlookMean = (pastMeans + forecast.mapNotNull { it.meanC }).takeIf { it.size >= 3 }?.average()
+        val recommended = outlookMean?.let(Units::cToF)?.let { m ->
+            sources.filter { it.covers(m) }.ifEmpty {
+                // Nothing covers it: use the source whose range is closest.
+                sources.minByOrNull { src ->
+                    when {
+                        src.minF != null && m < src.minF -> src.minF - m
+                        src.maxF != null && m >= src.maxF -> m - src.maxF
+                        else -> 0.0
+                    }
+                }?.let(::listOf).orEmpty()
+            }.map { it.label }
+        }.orEmpty()
+
         val tasks = mutableListOf<HeatingTask>()
         if (sources.isEmpty()) tasks += HeatingTask(HeatingTask.Kind.NO_SOURCES)
         val types = sources.map { it.type }.toSet()
+        val burnsWood = types.any { it.fuel == "wood" }
+        val burnsPellets = types.any { it.fuel == "pellets" }
         val month = today.monthValue
         val coldest = forecast.mapNotNull { it.lowC }.minOrNull()?.let(Units::cToF)
-        val fuelTypes = types.filter { it.fuel != null && it != HeatType.WOOD && it != HeatType.PELLETS }
+        val fuelTypes = types.filter { it.fuel != null && it.fuel != "wood" && it.fuel != "pellets" }
 
         // Before the season.
         if (phase == HeatingPhase.PREPARE || (phase == HeatingPhase.EARLY && month <= 10)) {
             tasks += HeatingTask(HeatingTask.Kind.SERVICE_SYSTEM)
-            if (HeatType.WOOD in types || HeatType.PELLETS in types) tasks += HeatingTask(HeatingTask.Kind.CHIMNEY_SWEEP)
+            if (burnsWood || burnsPellets) tasks += HeatingTask(HeatingTask.Kind.CHIMNEY_SWEEP)
             tasks += HeatingTask(HeatingTask.Kind.CO_DETECTORS)
             fuelTypes.forEach { tasks += HeatingTask(HeatingTask.Kind.FILL_TANK_PREBUY, it) }
-            if (HeatType.WOOD in types) tasks += HeatingTask(HeatingTask.Kind.BUY_SEASONED_WOOD, HeatType.WOOD)
-            if (HeatType.PELLETS in types) tasks += HeatingTask(HeatingTask.Kind.BUY_PELLETS, HeatType.PELLETS)
+            if (burnsWood) tasks += HeatingTask(HeatingTask.Kind.BUY_SEASONED_WOOD, HeatType.WOOD)
+            if (burnsPellets) tasks += HeatingTask(HeatingTask.Kind.BUY_PELLETS, HeatType.PELLETS)
             if (HeatType.HEAT_PUMP in types) tasks += HeatingTask(HeatingTask.Kind.HEAT_PUMP_FILTERS, HeatType.HEAT_PUMP)
         }
         // Spring/summer: next winter's wood needs 6–12 months to season; pellets are cheapest off-season.
-        if (HeatType.WOOD in types && month in 3..7) tasks += HeatingTask(HeatingTask.Kind.SPLIT_STACK_NEXT_YEAR, HeatType.WOOD)
-        if (HeatType.PELLETS in types && month in 4..6) tasks += HeatingTask(HeatingTask.Kind.BUY_PELLETS, HeatType.PELLETS)
+        if (burnsWood && month in 3..7) tasks += HeatingTask(HeatingTask.Kind.SPLIT_STACK_NEXT_YEAR, HeatType.WOOD)
+        if (burnsPellets && month in 4..6) tasks += HeatingTask(HeatingTask.Kind.BUY_PELLETS, HeatType.PELLETS)
 
         // In season: cold snaps.
         if (coldest != null && coldest <= 10) {
             fuelTypes.forEach { tasks += HeatingTask(HeatingTask.Kind.CHECK_TANK_COLD_SNAP, it, Units.fToC(coldest)) }
-            if (HeatType.WOOD in types) tasks += HeatingTask(HeatingTask.Kind.MOVE_WOOD_IN, HeatType.WOOD)
+            if (burnsWood) tasks += HeatingTask(HeatingTask.Kind.MOVE_WOOD_IN, HeatType.WOOD)
         }
         if (coldest != null && coldest <= 0) tasks += HeatingTask(HeatingTask.Kind.PROTECT_PIPES, value = Units.fToC(coldest))
         sources.filter { it.type == HeatType.HEAT_PUMP && it.minF != null }.forEach { hp ->
@@ -173,7 +203,9 @@ object HeatingAdvisor {
 
         return HeatingReport(
             phase = phase,
-            days = forecast,
+            recommended = recommended,
+            outlookMeanC = outlookMean,
+            days = if (aggressive) forecast else forecast.map { it.copy(sources = emptyList(), nightSources = emptyList()) },
             tasks = tasks.distinctBy { it.kind to it.source },
             weekHdd = forecast.sumOf { it.hdd },
             recentHdd = recentHdd,

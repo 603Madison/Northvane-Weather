@@ -10,6 +10,10 @@ import app.northvane.core.traffic.TrafficClient
 import app.northvane.core.traffic.TrafficService
 import app.northvane.weather.data.ThemeBackgroundStore
 import app.northvane.weather.data.ClimateStore
+import app.northvane.weather.data.AiSummaryStore
+import app.northvane.weather.data.TrafficCache
+import app.northvane.core.ai.AiClient
+import app.northvane.core.eccc.EcccClient
 import app.northvane.core.nws.NwsClient
 import app.northvane.core.pollen.PollenClient
 import app.northvane.core.owm.OwmClient
@@ -66,10 +70,14 @@ class AppContainer(val app: Application) {
     val themeBackground = ThemeBackgroundStore(app)
     val acis: AcisClient by lazy { AcisClient(http) }
     val climate: ClimateStore by lazy { ClimateStore(app, acis) }
+    val ai: AiClient by lazy { AiClient(HttpClients.localServerClients(http)) }
+    val aiSummaries: AiSummaryStore by lazy { AiSummaryStore(app) }
+    val trafficCache: TrafficCache by lazy { TrafficCache(app) }
 
     val repository: WeatherRepository by lazy {
         WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = acis, pollen = pollen,
             airNow = airNow, epaUv = EpaUvClient(http), openMeteoAir = OpenMeteoAirClient(http),
+            eccc = EcccClient(http),
         )
     }
 

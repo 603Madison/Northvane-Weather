@@ -123,6 +123,9 @@ data class WateringAdvice(val action: WateringAction, val pastWeekMm: Double, va
 @Serializable
 enum class SoilState(val label: String) { FROZEN("Frozen"), TOO_WET("Too wet to work"), WORKABLE("Ready to work"), DRY("Dry: water before planting") }
 
+/** One plant's current planting step and/or harvest outlook, for a single combined garden card. */
+data class PlantStatus(val crop: Crop, val planting: PlantingAdvice?, val harvest: HarvestAdvice?)
+
 /** Everything the garden cards show. */
 @Serializable
 data class GardenReport(
@@ -191,6 +194,35 @@ object GardenAdvisor {
             gddBase50 = gdd(history, today),
             inGrowingSeason = inSeason,
         )
+    }
+
+    /**
+     * Per plant: the next planting step that's relevant now (open, blocked, late,
+     * or starting within three weeks) and the harvest if it's coming up within
+     * three weeks or under way. Plants with neither are left out.
+     */
+    fun plants(report: GardenReport, today: LocalDate, planting: Boolean = true, harvest: Boolean = true): List<PlantStatus> {
+        val order = PlantingStep.entries
+        val crops = (report.planting.map { it.crop } + report.harvest.map { it.crop }).distinct()
+        return crops.mapNotNull { crop ->
+            // The most actionable step first (a good planting day beats hardening off), then the earliest step.
+            val step = report.planting.filter { it.crop == crop && it.status != StepStatus.DONE }
+                .filterNot { it.status == StepStatus.LATE && today.isAfter(it.windowEnd.plusDays(28)) }
+                .minWithOrNull(compareBy({ if (it.status == StepStatus.GOOD_DAY) 0 else 1 }, { statusOrder(it.status) }, { order.indexOf(it.step) }))
+                ?.takeIf { planting && (it.status != StepStatus.UPCOMING || !it.windowStart.isAfter(today.plusDays(21))) }
+                ?.takeUnless { it.status == StepStatus.LATE && today.isAfter(it.windowEnd.plusDays(28)) }
+            val h = report.harvest.firstOrNull { it.crop == crop }
+                ?.takeIf { harvest && it.status != HarvestStatus.FINISHED && !today.isBefore(it.start.minusDays(21)) && !today.isAfter(it.end.plusDays(7)) }
+            if (step == null && h == null) null else PlantStatus(crop, step, h)
+        }.sortedBy { p ->
+            when {
+                p.planting?.status in setOf(StepStatus.GOOD_DAY, StepStatus.NOW) -> 0
+                p.harvest?.status in setOf(HarvestStatus.PICK_BEFORE_FROST, HarvestStatus.COVER_FOR_FROST) -> 0
+                p.harvest?.status == HarvestStatus.READY -> 1
+                p.planting?.status in setOf(StepStatus.WAIT_FROST, StepStatus.WAIT_SOIL) -> 2
+                else -> 3
+            }
+        }
     }
 
     private fun statusOrder(s: StepStatus) = when (s) {

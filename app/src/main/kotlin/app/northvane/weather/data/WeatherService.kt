@@ -122,9 +122,12 @@ class WeatherService(
         val airQuality = fresh.airQuality ?: previous.airQuality?.takeIf { Duration.between(it.fetchedAt, now) < airAge }
         val uv = fresh.uv ?: previous.uv?.takeIf { Duration.between(it.fetchedAt, now) < airAge }
         val throttled = setOf(Section.HISTORY, Section.POLLEN, Section.AIR_QUALITY)
+        // Sections kept from the previous download keep their original download time.
+        val times = previous.sectionTimes.filterKeys { it !in fresh.sectionTimes } + fresh.sectionTimes
         return fresh.copy(
             history = history, pollen = pollen, airQuality = airQuality, uv = uv,
             skippedSections = fresh.skippedSections - throttled,
+            sectionTimes = times,
         )
     }
 

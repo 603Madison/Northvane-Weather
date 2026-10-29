@@ -87,6 +87,12 @@ fun TrafficScreen(state: MainUiState, container: AppContainer, onOpenSettings: (
     val paused = state.liteMode && SatelliteFeature.TRAFFIC !in settings.satelliteFeatures && !loadAnyway
     val flowAllowed = !state.liteMode || SatelliteFeature.TRAFFIC_FLOW in settings.satelliteFeatures
 
+    // On satellite with traffic off, show the last saved events if they're recent (or stale data is allowed).
+    val cachedAge = location?.let { container.trafficCache.age(it.id) }
+    val cachedOk = cachedAge != null && (settings.showStaleData || cachedAge < app.northvane.weather.ui.MainUiState.STALE_AFTER)
+    if (location != null && paused && cachedOk) {
+        LaunchedEffect(location.id) { vm.loadCached(location) }
+    }
     if (location != null && !paused) {
         LaunchedEffect(location.id, location.latitude, location.longitude, settings.trafficRadiusKm, settings.trafficFlowLayer, flowAllowed, dark) {
             vm.load(location, stateCode, settings.trafficRadiusKm, settings.trafficFlowLayer && flowAllowed, dark)
@@ -111,7 +117,13 @@ fun TrafficScreen(state: MainUiState, container: AppContainer, onOpenSettings: (
                     }
                 },
                 actions = {
-                    if (location != null && !paused) {
+                    // On satellite with traffic off, show the last saved events if they're recent (or stale data is allowed).
+    val cachedAge = location?.let { container.trafficCache.age(it.id) }
+    val cachedOk = cachedAge != null && (settings.showStaleData || cachedAge < app.northvane.weather.ui.MainUiState.STALE_AFTER)
+    if (location != null && paused && cachedOk) {
+        LaunchedEffect(location.id) { vm.loadCached(location) }
+    }
+    if (location != null && !paused) {
                         IconButton(onClick = {
                             vm.load(location, stateCode, settings.trafficRadiusKm, settings.trafficFlowLayer && flowAllowed, dark, force = true)
                         }) { Icon(Icons.Filled.Refresh, contentDescription = "Reload traffic") }
@@ -124,6 +136,15 @@ fun TrafficScreen(state: MainUiState, container: AppContainer, onOpenSettings: (
         Box(Modifier.padding(padding).fillMaxSize()) {
             when {
                 location == null -> Centered("Add a location on the Today tab to see traffic.")
+                paused && cachedOk && traffic.snapshot != null -> Column(Modifier.fillMaxSize()) {
+                    Text(
+                        "Saved ${app.northvane.weather.ui.TimeFormat.ago(traffic.snapshot!!.fetchedAt)}. Traffic isn't downloaded on satellite.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                    TrafficEventList(traffic.copy(flowTiles = null), settings.units, stateCode, time, onFocus = {}, modifier = Modifier.weight(1f))
+                }
                 paused -> Column(
                     Modifier.fillMaxSize().padding(32.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,

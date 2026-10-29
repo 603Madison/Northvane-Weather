@@ -13,6 +13,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.model.UnitSystem
 import app.northvane.core.model.Activity
+import app.northvane.core.ai.AiProvider
 import app.northvane.core.garden.GardenCrop
 import app.northvane.core.json.NorthvaneJson
 import app.northvane.core.outlook.HeatSource
@@ -57,6 +58,7 @@ enum class SatelliteFeature(val title: String, val description: String, val appr
     AIR_QUALITY("Air quality & UV", "AQI (EPA AirNow or Open-Meteo) and EPA UV index; at most every 30 minutes", "~3 KB", true),
     TRAFFIC("Traffic events", "Work zones, closures and incidents from state DOT feeds", "50–700 KB per view", false),
     GARDEN_CLIMATE("Garden & heating frost dates", "30 years of NOAA lows, downloaded once per place", "~40 KB once", true),
+    AI_SUMMARY("AI weather summary", "Sends the forecast to your AI server and gets a short summary back", "~2–4 KB", false),
     TRAFFIC_FLOW("Traffic speed map", "TomTom flow tiles on the traffic map, if you've added a key", "0.3–1 MB per view", false),
     OWM_FALLBACK("OpenWeatherMap fallback", "Only if enabled in Data sources", "~5 KB", false);
 
@@ -85,7 +87,7 @@ data class AppSettings(
     val pollenEnabled: Boolean = false,
     val activitiesEnabled: Boolean = true,
     val activities: Set<Activity> = Activity.entries.toSet(),
-    val mudEnabled: Boolean = true,
+    val mudEnabled: Boolean = false,
     val foliageEnabled: Boolean = true,
     val satelliteLayer: Boolean = false,
     val satelliteImagery: SatelliteImagery = SatelliteImagery.AUTO,
@@ -103,7 +105,7 @@ data class AppSettings(
     val trafficRadiusKm: Double = 40.0,
     val trafficFlowLayer: Boolean = true,
     val hourlyExpanded: Boolean = false,
-    val dryingEnabled: Boolean = true,
+    val dryingEnabled: Boolean = false,
     /** When the user said laundry is out on the line (epoch ms), for rain warnings. */
     val laundryOutSince: Long? = null,
     val laundryLocationId: String? = null,
@@ -117,6 +119,13 @@ data class AppSettings(
     val gardenPlan: List<GardenCrop> = emptyList(),
     val heatingEnabled: Boolean = false,
     val heatSources: List<HeatSource> = emptyList(),
+    val heatingAggressive: Boolean = false,
+    /** On satellite limits, show cards whose data is over 12 hours old (or never downloaded). */
+    val showStaleData: Boolean = false,
+    val aiEnabled: Boolean = false,
+    val aiProvider: AiProvider = AiProvider.OLLAMA,
+    val aiBaseUrl: String = "",
+    val aiModel: String = "",
 ) {
     companion object {
         private fun defaultUnits(): UnitSystem =
@@ -180,6 +189,12 @@ class SettingsRepository(context: Context) {
         val gardenPlan = stringPreferencesKey("garden_plan")
         val heating = booleanPreferencesKey("heating")
         val heatSources = stringPreferencesKey("heat_sources")
+        val heatingAggressive = booleanPreferencesKey("heating_aggressive")
+        val showStale = booleanPreferencesKey("show_stale_data")
+        val ai = booleanPreferencesKey("ai_enabled")
+        val aiProvider = stringPreferencesKey("ai_provider")
+        val aiBaseUrl = stringPreferencesKey("ai_base_url")
+        val aiModel = stringPreferencesKey("ai_model")
     }
 
     private val gardenList = ListSerializer(GardenCrop.serializer())
@@ -250,6 +265,12 @@ class SettingsRepository(context: Context) {
                 gardenPlan = p[Keys.gardenPlan]?.let { runCatching { NorthvaneJson.decodeFromString(gardenList, it) }.getOrNull() } ?: d.gardenPlan,
                 heatingEnabled = p[Keys.heating] ?: d.heatingEnabled,
                 heatSources = p[Keys.heatSources]?.let { runCatching { NorthvaneJson.decodeFromString(heatList, it) }.getOrNull() } ?: d.heatSources,
+                heatingAggressive = p[Keys.heatingAggressive] ?: d.heatingAggressive,
+                showStaleData = p[Keys.showStale] ?: d.showStaleData,
+                aiEnabled = p[Keys.ai] ?: d.aiEnabled,
+                aiProvider = p[Keys.aiProvider].toEnum(d.aiProvider),
+                aiBaseUrl = p[Keys.aiBaseUrl] ?: d.aiBaseUrl,
+                aiModel = p[Keys.aiModel] ?: d.aiModel,
             )
         }
 
@@ -322,6 +343,19 @@ class SettingsRepository(context: Context) {
     suspend fun setTraffic(enabled: Boolean) = store.edit { it[Keys.traffic] = enabled }
     suspend fun setTrafficRadius(km: Double) = store.edit { it[Keys.trafficRadius] = km.coerceIn(5.0, 160.0) }
     suspend fun setTrafficFlow(enabled: Boolean) = store.edit { it[Keys.trafficFlow] = enabled }
+    suspend fun setHeatingAggressive(enabled: Boolean) = store.edit { it[Keys.heatingAggressive] = enabled }
+    suspend fun setShowStaleData(enabled: Boolean) = store.edit { it[Keys.showStale] = enabled }
+    suspend fun setAiEnabled(enabled: Boolean) = store.edit { it[Keys.ai] = enabled }
+    suspend fun setAiServer(provider: AiProvider, baseUrl: String, model: String) = store.edit {
+        it[Keys.aiProvider] = provider.name
+        it[Keys.aiBaseUrl] = baseUrl.trim().take(500)
+        it[Keys.aiModel] = model.trim().take(200)
+    }
+    /** Enables or disables a group of satellite features at once. */
+    suspend fun setSatelliteFeatures(features: Collection<SatelliteFeature>, enabled: Boolean) = store.edit { p ->
+        val current = p[Keys.satelliteFeatures] ?: SatelliteFeature.DEFAULTS.map { it.name }.toSet()
+        p[Keys.satelliteFeatures] = if (enabled) current + features.map { it.name } else current - features.map { it.name }.toSet()
+    }
     suspend fun setHourlyExpanded(expanded: Boolean) = store.edit { it[Keys.hourlyExpanded] = expanded }
     suspend fun setDrying(enabled: Boolean) = store.edit { it[Keys.drying] = enabled }
     suspend fun setLaundryOut(locationId: String?) = store.edit {
@@ -347,6 +381,24 @@ class SettingsRepository(context: Context) {
     suspend fun setGardenPlan(plan: List<GardenCrop>) = store.edit { it[Keys.gardenPlan] = NorthvaneJson.encodeToString(gardenList, plan) }
     suspend fun setHeating(enabled: Boolean) = store.edit { it[Keys.heating] = enabled }
     suspend fun setHeatSources(sources: List<HeatSource>) = store.edit { it[Keys.heatSources] = NorthvaneJson.encodeToString(heatList, sources) }
+}
+
+/** Satellite settings are shown in these groups, each with one switch and an optional per-item list. */
+enum class SatelliteGroup(val title: String, val description: String, val features: List<SatelliteFeature>) {
+    ESSENTIALS(
+        "Forecast & alerts", "Current conditions, forecasts and NWS/ECCC alerts. Small and recommended.",
+        listOf(SatelliteFeature.ALERTS, SatelliteFeature.BACKGROUND_ALERTS, SatelliteFeature.CURRENT_CONDITIONS, SatelliteFeature.DAILY_FORECAST,
+            SatelliteFeature.HOURLY_FORECAST, SatelliteFeature.FORECAST_DETAILS, SatelliteFeature.LOCAL_STATION),
+    ),
+    EXTRAS(
+        "Extras", "Air quality, pollen, recent weather and frost dates for the outlooks, AI summary, OpenWeatherMap.",
+        listOf(SatelliteFeature.AIR_QUALITY, SatelliteFeature.POLLEN, SatelliteFeature.HISTORY, SatelliteFeature.GARDEN_CLIMATE,
+            SatelliteFeature.AI_SUMMARY, SatelliteFeature.OWM_FALLBACK),
+    ),
+    MAPS(
+        "Maps", "Radar, future cast, satellite imagery and traffic. These download the most.",
+        listOf(SatelliteFeature.RADAR, SatelliteFeature.FUTURE_CAST, SatelliteFeature.SATELLITE_IMAGERY, SatelliteFeature.TRAFFIC, SatelliteFeature.TRAFFIC_FLOW),
+    ),
 }
 
 enum class GardenOption(val title: String, val description: String) {

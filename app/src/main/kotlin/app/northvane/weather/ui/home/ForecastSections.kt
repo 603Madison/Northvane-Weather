@@ -35,6 +35,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -295,23 +297,6 @@ internal fun DailySection(
                         if (isOpen) {
                             Spacer(Modifier.height(12.dp))
                             DayDetails(day, f)
-                            val mud = day.mud?.takeIf { showMud }
-                            if (mud != null) {
-                                Spacer(Modifier.height(10.dp))
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Canvas(Modifier.size(10.dp)) { drawCircle(mudColor(mud.level)) }
-                                    Spacer(Modifier.width(6.dp))
-                                    Text(
-                                        "Trails: ${mud.level.label.lowercase()}" + if (mud.mudSeason) " (mud season)" else "",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                }
-                            }
-                            val scores = day.activities.filter { it.activity in activities }
-                            if (scores.isNotEmpty()) {
-                                Spacer(Modifier.height(10.dp))
-                                ActivityStrip(scores)
-                            }
                             outage?.let {
                                 Spacer(Modifier.height(10.dp))
                                 OutagePanel(it, f, heatTypes)
@@ -544,10 +529,19 @@ internal fun SunCard(location: SavedLocation, zone: ZoneId, time: TimeFormat) {
                 }
                 Text(headline, style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
+                // Easter egg: long-press the sun and it puts on sunglasses.
+                var cool by remember { mutableStateOf(false) }
+                LaunchedEffect(cool) {
+                    if (cool) {
+                        delay(4_000)
+                        cool = false
+                    }
+                }
                 Box(
                     Modifier
                         .fillMaxWidth()
-                        .height(96.dp),
+                        .height(96.dp)
+                        .pointerInput(Unit) { detectTapGestures(onLongPress = { cool = true }) },
                 ) {
                     Canvas(Modifier.matchParentSize()) {
                         val pad = 18.dp.toPx()
@@ -574,6 +568,13 @@ internal fun SunCard(location: SavedLocation, zone: ZoneId, time: TimeFormat) {
                             val sun = Offset(cx + (rx * cos(angle)).toFloat(), baseY - (ry * sin(angle)).toFloat())
                             drawCircle(sunColor.copy(alpha = 0.25f), 14.dp.toPx(), sun)
                             drawCircle(sunColor, 8.dp.toPx(), sun)
+                            if (cool) {
+                                // Tiny sunglasses: two lenses and a bridge.
+                                val lens = 3.6.dp.toPx()
+                                drawCircle(Color(0xFF1B1B1B), lens, Offset(sun.x - lens * 1.15f, sun.y - 1.dp.toPx()))
+                                drawCircle(Color(0xFF1B1B1B), lens, Offset(sun.x + lens * 1.15f, sun.y - 1.dp.toPx()))
+                                drawLine(Color(0xFF1B1B1B), Offset(sun.x - lens * 0.3f, sun.y - 2.dp.toPx()), Offset(sun.x + lens * 0.3f, sun.y - 2.dp.toPx()), 1.5.dp.toPx())
+                            }
                         } else {
                             // Night: the sun waits on the horizon at the sunrise end.
                             drawCircle(trackColor, 4.dp.toPx(), Offset(cx - rx, baseY))

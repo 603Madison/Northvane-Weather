@@ -74,6 +74,7 @@ class TrafficViewModel(private val container: AppContainer) : ViewModel() {
             val result = attempt {
                 container.traffic.load(stateCode, location.point, radiusKm, ne511, { registry() }, Instant.now())
             }
+            result.getOrNull()?.let { container.trafficCache.write(location.id, it) }
             _state.update {
                 it.copy(
                     loading = false,
@@ -84,6 +85,14 @@ class TrafficViewModel(private val container: AppContainer) : ViewModel() {
                     flowTiles = tomTom?.takeIf { flowLayer }?.let { k -> TrafficClient.tomTomFlowTiles(k, dark) },
                 )
             }
+        }
+    }
+
+    /** Shows the last saved events for a place without downloading (satellite with traffic off). */
+    fun loadCached(location: SavedLocation) {
+        viewModelScope.launch {
+            val cached = container.trafficCache.read(location.id) ?: return@launch
+            _state.update { it.copy(snapshot = cached, loadedFor = null, flowTiles = null, error = null) }
         }
     }
 

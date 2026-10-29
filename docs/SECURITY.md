@@ -117,6 +117,13 @@ weather services described below.
 - The custom theme photo is copied into `noBackupFilesDir` after decoding and
   re-encoding, which strips EXIF metadata such as GPS position. The app uses
   the system photo picker and holds no media permission.
+- Canada: api.weather.gc.ca (Environment Canada city pages; nearest page looked
+  up with an id-only query).
+- AI summary (only if configured): the user's own server. The request holds
+  the place name and forecast numbers. The URL follows the same rules as WeeWX:
+  http only for private/LAN hosts (with LAN-only DNS) and never with an API key.
+  The key is stored encrypted, sent as a Bearer header, and requests are
+  `no-store`. The settings page sets `FLAG_SECURE`.
 - All of these hosts are HTTPS-only with system CAs in the network security config.
 - Place search uses the platform `Geocoder` (on most devices this is backed
   by the system location provider) and OpenWeatherMap geocoding only if the

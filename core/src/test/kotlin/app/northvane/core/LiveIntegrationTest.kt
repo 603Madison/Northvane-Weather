@@ -138,4 +138,14 @@ class LiveIntegrationTest {
         traffic.events.take(5).forEach { println("  ${it.type} ${it.road} ${it.direction} ${"%.1f".format(it.distanceKm)} km") }
         assertTrue(traffic.sources.isNotEmpty())
     }
+
+    @Test
+    fun environmentCanadaLive() = runBlocking {
+        val client = app.northvane.core.eccc.EcccClient(http)
+        val site = client.nearestSite(app.northvane.core.model.GeoPoint(45.96, -66.64))
+        val f = client.forecast(site, Instant.now())
+        println("ECCC $site ${f.placeName}: now ${f.current?.temperatureC}°C ${f.current?.description}; days ${f.daily.map { "${it.name} ${it.highC}/${it.lowC}" }}; alerts ${f.alerts.map { it.event }}")
+        assertEquals("nb-29", site)
+        assertTrue(f.daily.size >= 5 && f.hourly.size >= 20)
+    }
 }

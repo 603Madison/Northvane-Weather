@@ -29,6 +29,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.LocationOn
@@ -62,6 +64,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -223,6 +226,8 @@ fun LocationsScreen(state: MainUiState, vm: MainViewModel, container: AppContain
                     onRename = { renaming = location },
                     onToggleNotify = { vm.setLocationNotify(location.id, !location.notify) },
                     onRemove = { pendingDelete = location },
+                    onMoveUp = if (location != state.locations.first()) ({ vm.moveLocation(location.id, -1) }) else null,
+                    onMoveDown = if (location != state.locations.last()) ({ vm.moveLocation(location.id, 1) }) else null,
                 )
             }
         }
@@ -263,6 +268,8 @@ private fun SavedLocationRow(
     onRename: () -> Unit,
     onToggleNotify: () -> Unit,
     onRemove: () -> Unit,
+    onMoveUp: (() -> Unit)?,
+    onMoveDown: (() -> Unit)?,
 ) {
     var menu by remember { mutableStateOf(false) }
     val place = if (location.isDeviceLocation) "Your location" else "${GeoPoint.format(location.latitude)}, ${GeoPoint.format(location.longitude)}"
@@ -276,6 +283,13 @@ private fun SavedLocationRow(
         supportingContent = { Text(details) },
         leadingContent = { RadioButton(selected = selected, onClick = onSelect) },
         trailingContent = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = { onMoveUp?.invoke() }, enabled = onMoveUp != null) {
+                Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move ${location.displayName} up")
+            }
+            IconButton(onClick = { onMoveDown?.invoke() }, enabled = onMoveDown != null) {
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move ${location.displayName} down")
+            }
             Box {
                 IconButton(onClick = { menu = true }) {
                     Icon(Icons.Filled.MoreVert, contentDescription = "Options for ${location.displayName}")
@@ -298,6 +312,7 @@ private fun SavedLocationRow(
                         onClick = { menu = false; onRemove() },
                     )
                 }
+            }
             }
         },
         colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),

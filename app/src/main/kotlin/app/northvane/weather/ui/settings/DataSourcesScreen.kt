@@ -303,7 +303,8 @@ private fun NwsSection(savedContact: String?, onSave: (String?) -> Unit) {
     var contact by remember(savedContact) { mutableStateOf(savedContact.orEmpty()) }
     SectionCard("National Weather Service") {
         Text(
-            "Always on. Free, no account or key needed. Provides observations, forecasts and alerts for the US.",
+            "Always on. Free, no account or key needed. Provides observations, forecasts and alerts for the US. " +
+                "In Canada, Environment and Climate Change Canada provides them instead (also free and keyless).",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

@@ -93,6 +93,7 @@ class SecretStore(context: Context) {
         const val AIRNOW_API_KEY = "airnow_api_key"
         const val NE511_API_KEY = "ne511_api_key"
         const val TOMTOM_API_KEY = "tomtom_api_key"
+        const val AI_API_KEY = "ai_api_key"
         fun weewxSecret(stationId: String) = "weewx_secret_$stationId"
     }
 }

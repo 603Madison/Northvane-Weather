@@ -22,6 +22,12 @@ built into the app, and there are no accounts, ads or analytics.
 | **Look & feel** | Material 3, light/dark/system theme, optional wallpaper colors, °F/°C |
 
 <p>
+<img src="docs/screenshots/today_ai_summary.png" width="200" alt="AI summary on Today">
+<img src="docs/screenshots/today_canada.png" width="200" alt="Fredericton, NB from Environment Canada">
+<img src="docs/screenshots/outlook_tab.png" width="200" alt="Outlook tab">
+<img src="docs/screenshots/settings_satellite.png" width="200" alt="Satellite settings">
+</p>
+<p>
 <img src="docs/screenshots/today_light.png" width="200" alt="Today, Portland ME">
 <img src="docs/screenshots/warning_red.png" width="200" alt="Red Today screen during a warning">
 <img src="docs/screenshots/outage_outlook_dark.png" width="200" alt="Power outage outlook">
@@ -29,10 +35,8 @@ built into the app, and there are no accounts, ads or analytics.
 </p>
 <p>
 <img src="docs/screenshots/hourly_card.png" width="300" alt="Consolidated hourly card">
-<img src="docs/screenshots/outdoor_outlook.png" width="300" alt="Outdoor activity outlook">
 </p>
 <p>
-<img src="docs/screenshots/mud_pollen_foliage.png" width="250" alt="Trail mud, pollen and fall foliage">
 <img src="docs/screenshots/pollen_key_costs.png" width="250" alt="Pollen API key and costs">
 <img src="docs/screenshots/locations_nicknames.png" width="200" alt="Location nicknames and notifications">
 </p>
@@ -41,9 +45,7 @@ built into the app, and there are no accounts, ads or analytics.
 </p>
 <p>
 <img src="docs/screenshots/air_uv_allergy.png" width="250" alt="Air quality, UV and allergy score">
-<img src="docs/screenshots/garden_heating.png" width="250" alt="Garden planting, harvest and heating cards">
 <img src="docs/screenshots/outage_prepare.png" width="250" alt="Outage preparation steps">
-<img src="docs/screenshots/drying.png" width="250" alt="Clothes drying">
 <img src="docs/screenshots/traffic_list.png" width="250" alt="Traffic events near Portland, ME">
 <img src="docs/screenshots/themes_screen.png" width="250" alt="Theme picker">
 </p>
@@ -72,6 +74,9 @@ setups are especially welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Features
 
 ### Weather data
+- **US and Canada, for free.** The National Weather Service covers the US;
+  **Environment and Climate Change Canada** (MSC GeoMet city pages, keyless)
+  covers Canada, including public alerts and alert notifications.
 - **NWS first, for free.** Grid metadata for each location is cached for two
   weeks, so a refresh is a handful of small, gzip-compressed requests.
 - **WeeWX override.** Give a station its position and a radius (1–25 mi);
@@ -97,6 +102,20 @@ setups are especially welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
   off for satellite, amounts are read from the NWS forecast text instead.
 - **Sun** card: the sun's path across the sky with its current position, time
   to sunset or sunrise, day length and the change since yesterday.
+
+### AI summary (optional)
+Connect your own **Ollama**, **Open WebUI**, **LibreChat** (Agents API) or any
+**OpenAI-compatible** server (LM Studio, vLLM, llama.cpp, LiteLLM, OpenAI…)
+in Settings › AI summary. It writes a 2–4 sentence briefing that sits under
+current conditions on the Today screen. Only the place name and the forecast
+numbers are sent. Local servers can use plain HTTP on your home network; an API
+key is never sent over HTTP. Reasoning tags (`<think>…</think>`) are stripped,
+and a summary is written at most once per forecast download.
+
+### Outlook tab
+Planning cards live on their own tab so Today stays focused on the weather:
+outdoor activity scores, garden, trail mud, clothes drying, heating season and
+fall foliage. Each appears only when turned on and in season.
 
 ### Outdoor outlook (optional)
 Daily 0–100 scores, with reasons and practical recommendations, for **hiking**,
@@ -288,8 +307,12 @@ re-encoded into app storage with its location metadata removed.
   forecast details, hourly forecast, recent weather history, pollen, radar,
   radar future cast, satellite imagery and the OpenWeatherMap fallback. Limits apply on satellite automatically, always, or
   never.
-- Anything turned off keeps showing its last downloaded data (expired alerts
-  are dropped), and the Today screen lists what's paused. Timeouts are generous
+- Anything turned off keeps its last downloaded data, but cards whose data is
+  more than 12 hours old (or missing) are hidden while limits are on. Whole
+  tabs are hidden too, for example Traffic when traffic is off for satellite
+  and nothing recent is saved. Turn on **Show stale data** to see them anyway.
+- Options are grouped (Forecast & alerts, Extras, Maps) with one switch per
+  group and an expandable list of individual items and their sizes. Timeouts are generous
   for high-latency links.
 
 ## Building
@@ -365,6 +388,7 @@ docs/   Security and privacy notes.
 ## Data sources and attribution
 
 - Weather, alerts and radar: NOAA / National Weather Service (public domain).
+- Canada: Environment and Climate Change Canada (Open Government Licence – Canada).
 - HRRR future-cast tiles and the alternative NEXRAD composite: Iowa
   Environmental Mesonet, Iowa State University.
 - Recent observed weather: NOAA Regional Climate Centers, ACIS (public domain).

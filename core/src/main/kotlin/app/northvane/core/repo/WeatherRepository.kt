@@ -12,6 +12,9 @@ import app.northvane.core.model.WeatherAlert
 import app.northvane.core.model.WeatherCondition
 import app.northvane.core.model.WeatherSnapshot
 import app.northvane.core.air.AirNowClient
+import app.northvane.core.eccc.EcccClient
+import app.northvane.core.eccc.EcccForecast
+import app.northvane.core.eccc.OutsideEcccCoverageException
 import app.northvane.core.air.EpaUvClient
 import app.northvane.core.air.OpenMeteoAirClient
 import app.northvane.core.history.AcisClient
@@ -102,8 +105,23 @@ class WeatherRepository(
     private val airNow: AirNowClient? = null,
     private val epaUv: EpaUvClient? = null,
     private val openMeteoAir: OpenMeteoAirClient? = null,
+    private val eccc: EcccClient? = null,
 ) {
-    suspend fun alerts(point: GeoPoint): List<WeatherAlert> = nws.alerts(point.rounded())
+    /** Nearest Environment Canada city page per place; these never move. */
+    private val ecccSites = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Active alerts for background checks: NWS in the US, Environment Canada for Canadian places. */
+    suspend fun alerts(point: GeoPoint): List<WeatherAlert> {
+        val p = point.rounded()
+        return try {
+            nws.alerts(p)
+        } catch (e: app.northvane.core.net.HttpStatusException) {
+            // weather.gov answers 400 for points outside its area.
+            if (e.code !in 400..499 || eccc == null || !EcccClient.mayBeInCanada(p)) throw e
+            val site = ecccSites[p.nwsKey()] ?: eccc.nearestSite(p).also { ecccSites[p.nwsKey()] = it }
+            eccc.forecast(site, clock()).alerts
+        }
+    }
 
     suspend fun fetch(location: SavedLocation, config: SourceConfig, plan: FetchPlan = FetchPlan.FULL): WeatherSnapshot = coroutineScope {
         val now = clock()
@@ -188,10 +206,28 @@ class WeatherRepository(
         val nwsObservation = observationResult?.getOrNull()
         val weewxCurrent = weewxResult?.getOrNull()
 
+        // Canada: Environment and Climate Change Canada city pages, for places outside NWS coverage.
+        var ecccForecast: EcccForecast? = null
+        val wantsForecast = listOf(Section.CURRENT_CONDITIONS, Section.ALERTS, Section.DAILY_FORECAST, Section.HOURLY_FORECAST).any(wants)
+        if (outsideNws && eccc != null && EcccClient.mayBeInCanada(point) && wantsForecast) {
+            val result = attempt {
+                val site = ecccSites[point.nwsKey()] ?: eccc.nearestSite(point).also { ecccSites[point.nwsKey()] = it }
+                eccc.forecast(site, now)
+            }
+            result.exceptionOrNull()?.takeUnless { it is OutsideEcccCoverageException }
+                ?.let { issues += SourceIssue(DataSource.ECCC, it.toUserMessage()) }
+            ecccForecast = result.getOrNull()?.also { f ->
+                if (wants(Section.DAILY_FORECAST)) daily = f.daily
+                if (wants(Section.HOURLY_FORECAST)) hourly = f.hourly
+                if (daily.isNotEmpty() || hourly.isNotEmpty()) forecastSource = DataSource.ECCC
+            }
+        }
+        val forecastObservation = nwsObservation ?: ecccForecast?.current?.takeIf { wants(Section.CURRENT_CONDITIONS) }
+
         // OpenWeatherMap only fills gaps the free sources couldn't, and only for sections the plan wants.
         val needOwmForecast = (wants(Section.DAILY_FORECAST) && daily.isEmpty()) ||
             (wants(Section.HOURLY_FORECAST) && hourly.isEmpty())
-        val needOwmCurrent = wants(Section.CURRENT_CONDITIONS) && weewxCurrent == null && nwsObservation == null
+        val needOwmCurrent = wants(Section.CURRENT_CONDITIONS) && weewxCurrent == null && forecastObservation == null
         var owmForecast: OwmForecast? = null
         var owmCurrent: CurrentConditions? = null
         val apiKey = config.owmApiKey?.takeIf { wants(Section.OWM_FALLBACK) }
@@ -213,7 +249,7 @@ class WeatherRepository(
                 }
                 if (hourly.isEmpty() && wants(Section.HOURLY_FORECAST)) hourly = f.hourly
             }
-        } else if (outsideNws && config.owmApiKey == null) {
+        } else if (outsideNws && config.owmApiKey == null && ecccForecast == null) {
             issues += SourceIssue(
                 DataSource.OWM,
                 "Outside the US, add an OpenWeatherMap API key in Settings › Data sources to get weather here.",
@@ -221,19 +257,20 @@ class WeatherRepository(
         }
 
         val upcomingHourly = hourly.filter { it.time.isAfter(now.minus(Duration.ofMinutes(59))) }
-        val current = chooseCurrent(weewxCurrent, nwsObservation, owmCurrent, upcomingHourly.takeIf { wants(Section.CURRENT_CONDITIONS) }.orEmpty(), now)
+        val current = chooseCurrent(weewxCurrent, forecastObservation, owmCurrent, upcomingHourly.takeIf { wants(Section.CURRENT_CONDITIONS) }.orEmpty(), now)
             ?.let { withDaylight(it, location, now) }
 
-        val resolvedZone = zone ?: owmForecast?.zoneOffset ?: ZoneId.systemDefault()
+        val resolvedZone = zone ?: ecccForecast?.zone ?: owmForecast?.zoneOffset ?: ZoneId.systemDefault()
         val (sunrise, sunset) = Solar.sunTimes(
             location.latitude, location.longitude, now.atZone(resolvedZone).toLocalDate(), resolvedZone,
         )
-        val alerts = alertsResult?.getOrNull().orEmpty()
+        val ecccAlerts = ecccForecast?.alerts?.takeIf { wants(Section.ALERTS) }
+        val alerts = alertsResult?.getOrNull() ?: ecccAlerts.orEmpty()
         val skipped = Section.entries.filterNot(wants).toSet()
 
         val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK - Section.HISTORY - Section.POLLEN - Section.AIR_QUALITY).isNotEmpty()
         val gotExtras = historyResult?.isSuccess == true || pollenResult?.isSuccess == true || airResult?.air != null
-        if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true && !gotExtras) {
+        if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true && ecccAlerts == null && !gotExtras) {
             throw WeatherUnavailableException(issues.ifEmpty { listOf(SourceIssue(DataSource.NWS, "No data available")) })
         }
 
@@ -241,12 +278,12 @@ class WeatherRepository(
             locationId = location.id,
             fetchedAt = now,
             timeZoneId = resolvedZone.id,
-            placeName = meta?.point?.placeName ?: owmForecast?.cityName,
+            placeName = meta?.point?.placeName ?: ecccForecast?.placeName ?: owmForecast?.cityName,
             current = current,
             hourly = upcomingHourly.take(48),
             daily = daily.filter { !it.date.isBefore(now.atZone(resolvedZone).toLocalDate().minusDays(1)) },
             alerts = alerts,
-            alertsAvailable = meta != null || !outsideNws,
+            alertsAvailable = meta != null || !outsideNws || ecccForecast != null,
             forecastSource = forecastSource,
             radarStation = meta?.point?.radarStation,
             issues = issues.distinct(),
@@ -258,6 +295,17 @@ class WeatherRepository(
             pollen = pollenResult?.getOrNull(),
             airQuality = airResult?.air,
             uv = airResult?.uv,
+            sectionTimes = buildMap {
+                if (current != null && current.source != DataSource.NWS_FORECAST_ESTIMATE) put(Section.CURRENT_CONDITIONS, now)
+                if (weewxCurrent != null) put(Section.LOCAL_STATION, now)
+                if (alertsResult?.isSuccess == true || ecccAlerts != null) put(Section.ALERTS, now)
+                if (daily.isNotEmpty() && wants(Section.DAILY_FORECAST)) put(Section.DAILY_FORECAST, now)
+                if (upcomingHourly.isNotEmpty() && wants(Section.HOURLY_FORECAST)) put(Section.HOURLY_FORECAST, now)
+                if (grid != null) put(Section.FORECAST_DETAILS, now)
+                historyResult?.getOrNull()?.let { put(Section.HISTORY, it.fetchedAt) }
+                pollenResult?.getOrNull()?.let { put(Section.POLLEN, it.fetchedAt) }
+                airResult?.air?.let { put(Section.AIR_QUALITY, it.fetchedAt) }
+            },
         )
         Outlooks.annotate(snapshot, location.latitude, location.longitude, now)
     }

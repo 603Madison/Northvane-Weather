@@ -218,6 +218,9 @@ data class FoliageReport(
 ) {
     val today: FoliageDay? get() = days.firstOrNull()
 
+    /** Leaves are actually changing: from first color until they're down. */
+    val inSeason: Boolean get() = today?.stage?.let { it != FoliageStage.GREEN && it != FoliageStage.BARE } == true
+
     @Serializable
     enum class Note { COOL_NIGHTS, WARM_FALL, HARD_FREEZE, DRY, HIGH_ELEVATION, NO_HISTORY }
 }

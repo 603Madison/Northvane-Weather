@@ -125,6 +125,7 @@ class HomeActions(
     val setHourlyExpanded: (Boolean) -> Unit = {},
     val laundryOut: (Boolean) -> Unit = {},
     val markPlanted: (Crop) -> Unit = {},
+    val refreshSummary: () -> Unit = {},
 )
 
 @Composable
@@ -161,6 +162,26 @@ private fun HomeContent(
     val context = LocalContext.current
     val snapshot = state.snapshot
     val formatter = remember(state.settings.units) { UnitFormatter(state.settings.units) }
+    // Easter eggs: tap the temperature seven times for "science mode"; refresh five times in a row for some advice.
+    var showKelvin by remember { mutableStateOf(false) }
+    LaunchedEffect(showKelvin) {
+        if (showKelvin) {
+            kotlinx.coroutines.delay(6_000)
+            showKelvin = false
+        }
+    }
+    val refreshTimes = remember { ArrayDeque<Long>() }
+    var touchGrass by remember { mutableStateOf(false) }
+    val onRefresh: () -> Unit = {
+        val now = System.currentTimeMillis()
+        refreshTimes.addLast(now)
+        while (refreshTimes.isNotEmpty() && now - refreshTimes.first() > 20_000) refreshTimes.removeFirst()
+        if (refreshTimes.size >= 5) {
+            touchGrass = true
+            refreshTimes.clear()
+        }
+        actions.refresh()
+    }
     val zone = remember(snapshot?.timeZoneId) {
         snapshot?.timeZoneId?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
     }
@@ -216,7 +237,7 @@ private fun HomeContent(
         } else {
             PullToRefreshBox(
                 isRefreshing = state.refreshing,
-                onRefresh = actions.refresh,
+                onRefresh = onRefresh,
                 modifier = Modifier
                     .padding(padding)
                     .fillMaxSize(),
@@ -238,85 +259,80 @@ private fun HomeContent(
                     state.error?.let { message ->
                         item { MessageCard(message, onDismiss = actions.dismissError, stale = snapshot != null) }
                     }
+                    if (touchGrass) {
+                        item { TouchGrassCard(onDismiss = { touchGrass = false }) }
+                    }
                     if (snapshot == null) {
                         item { LoadingCard(state.refreshing) }
                     } else {
-                        item { HeroCard(snapshot, formatter, time, warning) }
-                        if (snapshot.alerts.isNotEmpty()) {
+                        val settings = state.settings
+                        val showCurrent = state.shows(Section.CURRENT_CONDITIONS)
+                        val hidden = mutableListOf<String>()
+                        if (showCurrent) {
+                            item {
+                                HeroCard(snapshot, formatter, time, warning, onEasterEgg = { showKelvin = true }, kelvin = showKelvin)
+                            }
+                        } else {
+                            hidden += "current conditions"
+                        }
+                        if (settings.aiEnabled && settings.aiBaseUrl.isNotBlank() && settings.aiModel.isNotBlank() &&
+                            state.shows(Section.DAILY_FORECAST)
+                        ) {
+                            item { AiSummaryCard(state.ai, time, onRefresh = actions.refreshSummary) }
+                        }
+                        if (snapshot.alerts.isNotEmpty() && state.shows(Section.ALERTS)) {
                             item { AlertBanner(snapshot.alerts, time, onOpenAlerts) }
                         }
-                        if (snapshot.hourly.isNotEmpty()) {
+                        if (snapshot.hourly.isNotEmpty() && state.shows(Section.HOURLY_FORECAST)) {
                             item { HourlySection(snapshot.hourly, formatter, time, state.settings.hourlyExpanded, actions.setHourlyExpanded) }
-                        } else if (Section.HOURLY_FORECAST in snapshot.skippedSections) {
-                            item { HintText("Hourly forecast is turned off for satellite connections.") }
+                        } else if (snapshot.hourly.isNotEmpty() || Section.HOURLY_FORECAST in snapshot.skippedSections) {
+                            hidden += "hourly forecast"
                         }
-                        val settings = state.settings
-                        val activities = if (settings.activitiesEnabled) settings.activities else emptySet()
-                        if (snapshot.daily.isNotEmpty()) {
+                        if (snapshot.daily.isNotEmpty() && state.shows(Section.DAILY_FORECAST)) {
                             item {
                                 DailySection(
                                     snapshot.daily, formatter, time,
                                     showOutage = settings.outageRiskEnabled,
-                                    activities = activities,
-                                    showMud = settings.mudEnabled,
                                     heatTypes = if (settings.heatingEnabled) settings.heatSources.map { it.type }.distinct() else emptyList(),
                                 )
                             }
+                        } else if (snapshot.daily.isNotEmpty()) {
+                            hidden += "daily forecast"
                         }
                         val air = snapshot.airQuality
-                        if (settings.airQualityEnabled && air != null) {
+                        val airFresh = state.shows(Section.AIR_QUALITY)
+                        if (settings.airQualityEnabled && air != null && airFresh) {
                             item { AirQualitySection(air, time) }
                         }
                         val uv = snapshot.uv
-                        if (settings.uvEnabled && uv != null) {
+                        if (settings.uvEnabled && uv != null && airFresh) {
                             item { UvSection(uv, time) }
                         }
-                        if (settings.dryingEnabled && snapshot.hourly.isNotEmpty()) {
-                            item {
-                                val drying = remember(snapshot) { DryingAdvisor.report(snapshot.hourly, snapshot.daily, Instant.now(), zone) }
-                                DryingSection(drying, settings.laundryOutSince != null, formatter, time, actions.laundryOut)
-                            }
-                        }
-                        if (activities.isNotEmpty()) {
-                            item { ActivitiesSection(snapshot.daily, activities, formatter, time) }
-                        }
-                        if (settings.mudEnabled && snapshot.daily.any { it.mud != null }) {
-                            item { MudSection(snapshot.daily, formatter, time) }
-                        }
-                        if (settings.pollenEnabled) {
+                        if ((air != null || uv != null) && !airFresh) hidden += "air quality and UV"
+                        // Pollen (with the personal allergy forecast) needs a Google Pollen key.
+                        val pollen = snapshot.pollen
+                        if (settings.pollenEnabled && state.pollenKeySet && pollen != null && state.shows(Section.POLLEN)) {
                             item {
                                 val allergyDays = remember(snapshot, settings.allergies) {
-                                    AllergyEstimator.forecast(settings.allergies, snapshot.daily, snapshot.pollen, snapshot.airQuality, time.today())
+                                    AllergyEstimator.forecast(settings.allergies, snapshot.daily, pollen, snapshot.airQuality, time.today())
                                 }
-                                // Personal allergy forecast lives in the pollen card, and only with real pollen data.
-                                val allergy: (@Composable () -> Unit)? = if (settings.allergyEnabled && state.pollenKeySet && snapshot.pollen != null) {
+                                val allergy: (@Composable () -> Unit)? = if (settings.allergyEnabled) {
                                     { AllergyBlock(allergyDays, settings.allergies.isNotEmpty(), formatter, time, onOpenAllergies) }
                                 } else {
                                     null
                                 }
-                                PollenSection(snapshot.pollen, hasKey = state.pollenKeySet, time = time, onOpenSources = onOpenSources, allergyContent = allergy)
+                                PollenSection(pollen, hasKey = true, time = time, onOpenSources = onOpenSources, allergyContent = allergy)
                             }
                         }
-                        val climate = state.frostClimate
-                        if (settings.gardenEnabled && climate != null && settings.gardenPlan.isNotEmpty()) {
-                            val garden = GardenAdvisor.report(settings.gardenPlan, climate, snapshot.daily, snapshot.history, time.today())
-                            if ((settings.gardenPlanting && garden.showPlanting) || (settings.gardenHarvest && garden.showHarvest) || garden.inGrowingSeason) {
-                                item { GardenSection(garden, settings, formatter, time, actions.markPlanted) }
-                            }
-                        }
-                        if (settings.heatingEnabled && HeatingAdvisor.visible(time.today(), settings.heatSources)) {
+                        if (hidden.isNotEmpty()) {
                             item {
-                                val heating = remember(snapshot, settings.heatSources, climate) {
-                                    HeatingAdvisor.report(settings.heatSources, snapshot.daily, snapshot.history, climate, time.today())
-                                }
-                                HeatingSection(heating, settings.heatSources.isNotEmpty(), formatter, time, onOpenHeating)
+                                HintText(
+                                    "Hidden on satellite because the data is over 12 hours old: ${hidden.joinToString(", ")}. " +
+                                        "Turn on Settings › Satellite & data saver › Show stale data to see it anyway.",
+                                )
                             }
                         }
-                        val foliage = snapshot.foliage
-                        if (settings.foliageEnabled && foliage != null) {
-                            item { FoliageSection(foliage, time) }
-                        }
-                        snapshot.current?.let { current ->
+                        snapshot.current?.takeIf { showCurrent }?.let { current ->
                             item { DetailsSection(current, formatter) }
                         }
                         state.selected?.let { location -> item { SunCard(location, zone, time) } }
@@ -411,7 +427,15 @@ private fun LocationTopBar(
 }
 
 @Composable
-private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeFormat, warning: Boolean) {
+private fun HeroCard(
+    snapshot: WeatherSnapshot,
+    f: UnitFormatter,
+    time: TimeFormat,
+    warning: Boolean,
+    onEasterEgg: () -> Unit = {},
+    kelvin: Boolean = false,
+) {
+    val taps = remember { ArrayDeque<Long>() }
     val current = snapshot.current
     val today = snapshot.daily.firstOrNull { it.date == time.today() } ?: snapshot.daily.firstOrNull()
     val condition = current?.condition ?: today?.condition ?: WeatherCondition.UNKNOWN
@@ -437,7 +461,21 @@ private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeForm
         Column {
             Row(verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(f.temperature(current?.temperatureC), style = MaterialTheme.typography.displayLarge, color = onHero)
+                    Text(
+                        if (kelvin) current?.temperatureC?.let { "%.1f K".format(it + 273.15) } ?: "--" else f.temperature(current?.temperatureC),
+                        style = if (kelvin) MaterialTheme.typography.displayMedium else MaterialTheme.typography.displayLarge,
+                        color = onHero,
+                        modifier = Modifier.clickable(interactionSource = null, indication = null) {
+                            val now = System.currentTimeMillis()
+                            taps.addLast(now)
+                            while (taps.isNotEmpty() && now - taps.first() > 3_000) taps.removeFirst()
+                            if (taps.size >= 7) {
+                                taps.clear()
+                                onEasterEgg()
+                            }
+                        },
+                    )
+                    if (kelvin) Text("Science mode engaged. Absolute zero is a long way off.", style = MaterialTheme.typography.labelMedium, color = onHero.copy(alpha = 0.9f))
                     Text(
                         current?.description ?: condition.label,
                         style = MaterialTheme.typography.titleMedium,
@@ -468,6 +506,62 @@ private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeForm
             }
             Spacer(Modifier.height(16.dp))
             current?.let { SourceBadge(it, time) }
+        }
+    }
+}
+
+@Composable
+private fun TouchGrassCard(onDismiss: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.tertiaryContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "🌱  The forecast is as fresh as it gets. Maybe step outside and check it in person?",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = onDismiss) { Text("Fine") }
+        }
+    }
+}
+
+/** A short plain-language briefing written by the user's own AI server from this forecast. */
+@Composable
+private fun AiSummaryCard(ai: app.northvane.weather.ui.AiUiState, time: TimeFormat, onRefresh: () -> Unit) {
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(start = 16.dp, top = 12.dp, end = 4.dp, bottom = 8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("✦ Summary", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                if (ai.loading) {
+                    CircularProgressIndicator(Modifier.size(18.dp).padding(end = 4.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(12.dp))
+                } else {
+                    IconButton(onClick = onRefresh) { Icon(Icons.Filled.Refresh, contentDescription = "Write a new summary") }
+                }
+            }
+            val summary = ai.summary
+            when {
+                summary != null -> Text(summary.text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(end = 12.dp))
+                ai.loading -> Text("Writing a summary…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                else -> Text("No summary yet.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            ai.error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp, end = 12.dp)) }
+            summary?.let {
+                Text(
+                    "AI-generated by ${it.model} · ${TimeFormat.ago(it.createdAt)}. Check the forecast for details.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp, end = 12.dp),
+                )
+            }
         }
     }
 }

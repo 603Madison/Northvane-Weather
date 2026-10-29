@@ -55,6 +55,17 @@ class LocationStore(context: Context) {
         p[locationsKey] = NorthvaneJson.encodeToString(locationList, current.map { if (it.id == id) change(it) else it })
     }
 
+    /** Moves a saved location up (negative) or down (positive) in the list. */
+    suspend fun move(id: String, offset: Int) = store.edit { p ->
+        val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty().toMutableList()
+        val from = current.indexOfFirst { it.id == id }
+        if (from < 0) return@edit
+        val to = (from + offset).coerceIn(0, current.lastIndex)
+        if (to == from) return@edit
+        current.add(to, current.removeAt(from))
+        p[locationsKey] = NorthvaneJson.encodeToString(locationList, current)
+    }
+
     suspend fun setNickname(id: String, nickname: String?) =
         updateLocation(id) { it.copy(nickname = nickname?.trim()?.take(40)?.takeIf { n -> n.isNotEmpty() }) }
 
