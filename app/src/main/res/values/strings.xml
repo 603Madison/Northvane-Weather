@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Northvane</string>
+    <string name="channel_warnings">Warnings</string>
+    <string name="channel_warnings_desc">NWS warnings: tornado, severe thunderstorm, flash flood, winter storm and other hazards that are occurring or imminent.</string>
+    <string name="channel_watches">Watches</string>
+    <string name="channel_watches_desc">NWS watches: conditions are favorable for hazardous weather.</string>
+    <string name="channel_advisories">Advisories</string>
+    <string name="channel_advisories_desc">NWS advisories: less serious conditions that may cause inconvenience.</string>
+    <string name="channel_statements">Statements &amp; other</string>
+    <string name="channel_statements_desc">Special weather statements, outlooks and other NWS messages.</string>
+</resources>

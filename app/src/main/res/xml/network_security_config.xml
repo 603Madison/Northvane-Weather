@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config xmlns:tools="http://schemas.android.com/tools">
+    <!--
+      Applies only to servers the user configures themselves (their WeeWX
+      station). The platform permits cleartext here solely so a station on the
+      home network can be reached at e.g. http://192.168.1.20/. The app adds its
+      own stricter policy on top (CleartextGuardInterceptor, PrivateNetworkDns,
+      UrlPolicy in :core): http:// is refused for anything that is not a
+      private-network address, and credentials are never sent over http://.
+      User-installed CAs are trusted so a self-hosted server with a private CA
+      can use HTTPS.
+    -->
+    <base-config
+        cleartextTrafficPermitted="true"
+        tools:ignore="InsecureBaseConfiguration">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" tools:ignore="AcceptsUserCertificates" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Every built-in service: HTTPS only, publicly trusted CAs only. -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">weather.gov</domain>
+        <domain includeSubdomains="true">noaa.gov</domain>
+        <domain includeSubdomains="true">iastate.edu</domain>
+        <domain includeSubdomains="true">openfreemap.org</domain>
+        <domain includeSubdomains="true">openweathermap.org</domain>
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

@@ -1,0 +1,31 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Northvane version
+      placeholder: "1.0.0"
+  - type: input
+    id: device
+    attributes:
+      label: Phone and Android version
+      placeholder: "Pixel 10, Android 16"
+  - type: dropdown
+    id: network
+    attributes:
+      label: Connection
+      options: [Wi-Fi, Mobile data, Satellite (e.g. T-Satellite), Not sure]
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: "Please don't include API keys, passwords or exact home coordinates."

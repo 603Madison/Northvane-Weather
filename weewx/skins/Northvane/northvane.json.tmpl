@@ -1,0 +1,23 @@
+#errorCatcher Echo
+## Northvane Weather current-conditions feed for WeeWX (Cheetah template).
+## All values are converted to metric here, so the app never has to guess units.
+## Missing readings are written as JSON null.
+#set $loc = $station.location.replace('"', '').replace('\\', '')
+{
+  "northvane_format": 1,
+  "station": "$loc",
+  "time": $current.dateTime.raw,
+  "outTemp_C": $current.outTemp.degree_C.format("%.2f", "null", add_label=False, localize=False),
+  "dewpoint_C": $current.dewpoint.degree_C.format("%.2f", "null", add_label=False, localize=False),
+  "outHumidity": $current.outHumidity.format("%.1f", "null", add_label=False, localize=False),
+  "windSpeed_kph": $current.windSpeed.km_per_hour.format("%.2f", "null", add_label=False, localize=False),
+  "windGust_kph": $current.windGust.km_per_hour.format("%.2f", "null", add_label=False, localize=False),
+  "windDir": $current.windDir.format("%.0f", "null", add_label=False, localize=False),
+  "barometer_hPa": $current.barometer.mbar.format("%.2f", "null", add_label=False, localize=False),
+  "rainRate_mmph": $current.rainRate.mm_per_hour.format("%.2f", "null", add_label=False, localize=False),
+  "dayRain_mm": $day.rain.sum.mm.format("%.2f", "null", add_label=False, localize=False),
+  "heatindex_C": $current.heatindex.degree_C.format("%.2f", "null", add_label=False, localize=False),
+  "windchill_C": $current.windchill.degree_C.format("%.2f", "null", add_label=False, localize=False),
+  "UV": $current.UV.format("%.1f", "null", add_label=False, localize=False),
+  "radiation": $current.radiation.format("%.0f", "null", add_label=False, localize=False)
+}

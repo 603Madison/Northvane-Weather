@@ -1,0 +1,79 @@
+package app.northvane.weather.data
+
+import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import app.northvane.core.json.NorthvaneJson
+import app.northvane.core.model.SavedLocation
+import app.northvane.core.weewx.WeeWxStation
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.builtins.ListSerializer
+import java.io.IOException
+
+private val Context.locationStore: DataStore<Preferences> by preferencesDataStore(name = "locations")
+
+/** Saved locations and WeeWX station definitions (non-secret parts only). */
+class LocationStore(context: Context) {
+    private val store = context.applicationContext.locationStore
+    private val locationsKey = stringPreferencesKey("locations")
+    private val stationsKey = stringPreferencesKey("weewx_stations")
+    private val locationList = ListSerializer(SavedLocation.serializer())
+    private val stationList = ListSerializer(WeeWxStation.serializer())
+
+    private val data = store.data.catch { if (it is IOException) emit(emptyPreferences()) else throw it }
+
+    val locations: Flow<List<SavedLocation>> = data.map { p ->
+        p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()
+    }
+
+    val stations: Flow<List<WeeWxStation>> = data.map { p ->
+        p[stationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(stationList, it) }.getOrNull() }.orEmpty()
+    }
+
+    suspend fun upsertLocation(location: SavedLocation) = store.edit { p ->
+        val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()
+        val updated = if (current.any { it.id == location.id }) {
+            current.map { if (it.id == location.id) location else it }
+        } else if (location.isDeviceLocation) {
+            listOf(location) + current
+        } else {
+            current + location
+        }
+        p[locationsKey] = NorthvaneJson.encodeToString(locationList, updated)
+    }
+
+    suspend fun removeLocation(id: String) = store.edit { p ->
+        val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()
+        p[locationsKey] = NorthvaneJson.encodeToString(locationList, current.filterNot { it.id == id })
+        val stations = p[stationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(stationList, it) }.getOrNull() }.orEmpty()
+        p[stationsKey] = NorthvaneJson.encodeToString(
+            stationList,
+            stations.map { if (it.linkedLocationId == id) it.copy(linkedLocationId = null) else it },
+        )
+    }
+
+    suspend fun upsertStation(station: WeeWxStation) = store.edit { p ->
+        val current = p[stationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(stationList, it) }.getOrNull() }.orEmpty()
+        val updated = if (current.any { it.id == station.id }) {
+            current.map { if (it.id == station.id) station else it }
+        } else {
+            current + station
+        }
+        p[stationsKey] = NorthvaneJson.encodeToString(stationList, updated)
+    }
+
+    suspend fun removeStation(id: String) = store.edit { p ->
+        val current = p[stationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(stationList, it) }.getOrNull() }.orEmpty()
+        p[stationsKey] = NorthvaneJson.encodeToString(stationList, current.filterNot { it.id == id })
+    }
+
+    companion object {
+        const val DEVICE_LOCATION_ID = "device"
+    }
+}

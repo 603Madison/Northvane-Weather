@@ -1,0 +1,326 @@
+package app.northvane.core.repo
+
+import app.northvane.core.model.CurrentConditions
+import app.northvane.core.model.DailyForecast
+import app.northvane.core.model.DataSource
+import app.northvane.core.model.GeoPoint
+import app.northvane.core.model.HourlyForecast
+import app.northvane.core.model.SavedLocation
+import app.northvane.core.model.Section
+import app.northvane.core.model.SourceIssue
+import app.northvane.core.model.WeatherAlert
+import app.northvane.core.model.WeatherCondition
+import app.northvane.core.model.WeatherSnapshot
+import app.northvane.core.net.OutsideNwsCoverageException
+import app.northvane.core.net.WeatherApiException
+import app.northvane.core.net.toUserMessage
+import app.northvane.core.nws.NwsClient
+import app.northvane.core.nws.NwsPoint
+import app.northvane.core.nws.NwsStation
+import app.northvane.core.nws.ForecastDetails
+import app.northvane.core.outage.OutageEstimator
+import app.northvane.core.owm.OwmClient
+import app.northvane.core.owm.OwmForecast
+import app.northvane.core.util.Solar
+import app.northvane.core.weewx.WeeWxClient
+import app.northvane.core.weewx.WeeWxSecret
+import app.northvane.core.weewx.WeeWxStation
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.serialization.Serializable
+import java.time.Duration
+import java.time.Instant
+import java.time.ZoneId
+
+/**
+ * What to download in one refresh. On unconstrained networks everything is
+ * fetched; on satellite links the user chooses (see the app's satellite
+ * settings). Skipped sections are reported so cached data can be kept.
+ */
+data class FetchPlan(
+    val sections: Set<Section> = Section.entries.toSet(),
+    /** Fewer stations means fewer requests when the nearest one has no fresh reading. */
+    val observationStations: Int = 3,
+    /** Set when the plan comes from satellite / data-saver limits (shown in the UI). */
+    val limited: Boolean = false,
+) {
+    operator fun contains(section: Section) = section in sections
+
+    companion object {
+        val FULL = FetchPlan()
+    }
+}
+
+/** Per-refresh view of the user's source configuration. */
+data class SourceConfig(
+    val weewxStation: WeeWxStation? = null,
+    val weewxSecret: WeeWxSecret? = null,
+    /** Null unless the user enabled OpenWeatherMap and entered a key. */
+    val owmApiKey: String? = null,
+    /** Set when the platform won't let us reach the station (e.g. local network permission denied). */
+    val weewxBlockedReason: String? = null,
+)
+
+@Serializable
+data class CachedNwsPoint(val point: NwsPoint, val stations: List<NwsStation>, val savedAtEpochMs: Long)
+
+/** Persistent cache for NWS grid metadata, which almost never changes for a location. */
+interface NwsPointCache {
+    suspend fun get(key: String): CachedNwsPoint?
+    suspend fun put(key: String, value: CachedNwsPoint)
+}
+
+class WeatherUnavailableException(val issues: List<SourceIssue>) :
+    WeatherApiException(issues.firstOrNull()?.message ?: "Weather data is unavailable")
+
+class WeatherRepository(
+    private val nws: NwsClient,
+    private val owm: OwmClient,
+    private val weewx: WeeWxClient,
+    private val pointCache: NwsPointCache,
+    private val clock: () -> Instant = Instant::now,
+) {
+    suspend fun alerts(point: GeoPoint): List<WeatherAlert> = nws.alerts(point.rounded())
+
+    suspend fun fetch(location: SavedLocation, config: SourceConfig, plan: FetchPlan = FetchPlan.FULL): WeatherSnapshot = coroutineScope {
+        val now = clock()
+        val point = location.point.rounded()
+        val issues = mutableListOf<SourceIssue>()
+        val wants = { section: Section -> section in plan }
+        val needsNws = listOf(Section.CURRENT_CONDITIONS, Section.ALERTS, Section.DAILY_FORECAST, Section.HOURLY_FORECAST, Section.FORECAST_DETAILS)
+            .any(wants)
+
+        // Grid metadata: fetched (or refreshed) only if some NWS section is wanted; otherwise cache only.
+        val nwsMeta = if (needsNws) attempt { resolvePoint(point, now) } else Result.success(pointCache.get(point.nwsKey()))
+        val meta = nwsMeta.getOrNull()
+        val outsideNws = nwsMeta.exceptionOrNull() is OutsideNwsCoverageException
+        nwsMeta.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, it.toUserMessage()) }
+        val zone = meta?.let { NwsClient.zoneOf(it.point) }
+
+        val linkedStation = config.weewxStation?.takeIf { it.enabled && it.linkedLocationId == location.id && wants(Section.LOCAL_STATION) }
+        if (linkedStation != null && config.weewxBlockedReason != null) {
+            issues += SourceIssue(DataSource.WEEWX, config.weewxBlockedReason)
+        }
+        val weewxStation = linkedStation?.takeIf { config.weewxBlockedReason == null }
+        val weewxJob = weewxStation?.let { station ->
+            async { attempt { weewx.fetch(station, config.weewxSecret, zone ?: ZoneId.systemDefault(), now) } }
+        }
+        val alertsJob = meta?.takeIf { wants(Section.ALERTS) }?.let { async { attempt { nws.alerts(point) } } }
+        val dailyJob = meta?.takeIf { wants(Section.DAILY_FORECAST) }?.let { m -> async { attempt { nws.daily(m.point) } } }
+        val hourlyJob = meta?.takeIf { wants(Section.HOURLY_FORECAST) }?.let { m -> async { attempt { nws.hourly(m.point) } } }
+        val gridJob = meta?.takeIf { wants(Section.FORECAST_DETAILS) }?.let { m -> async { attempt { nws.gridData(m.point) } } }
+        val observationJob = meta?.takeIf { wants(Section.CURRENT_CONDITIONS) }?.let { m ->
+            async { attempt { latestObservation(m, plan.observationStations, now) } }
+        }
+
+        val weewxResult = weewxJob?.await()
+        val alertsResult = alertsJob?.await()
+        val dailyResult = dailyJob?.await()
+        val hourlyResult = hourlyJob?.await()
+        val gridResult = gridJob?.await()
+        val observationResult = observationJob?.await()
+
+        weewxResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.WEEWX, it.toUserMessage()) }
+        alertsResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Alerts: ${it.toUserMessage()}") }
+        dailyResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Forecast: ${it.toUserMessage()}") }
+        hourlyResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Hourly: ${it.toUserMessage()}") }
+        gridResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Forecast details: ${it.toUserMessage()}") }
+        observationResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Observations: ${it.toUserMessage()}") }
+
+        val grid = gridResult?.getOrNull()
+        var daily: List<DailyForecast> = dailyResult?.getOrNull().orEmpty()
+        var hourly: List<HourlyForecast> = hourlyResult?.getOrNull().orEmpty()
+        if (grid != null && zone != null) {
+            hourly = ForecastDetails.enrichHourly(hourly, grid)
+            daily = ForecastDetails.enrichDaily(daily, grid, zone)
+        }
+        daily = ForecastDetails.enrichFromText(daily)
+        var forecastSource: DataSource? = if (daily.isNotEmpty() || hourly.isNotEmpty()) DataSource.NWS else null
+        val nwsObservation = observationResult?.getOrNull()
+        val weewxCurrent = weewxResult?.getOrNull()
+
+        // OpenWeatherMap only fills gaps the free sources couldn't, and only for sections the plan wants.
+        val needOwmForecast = (wants(Section.DAILY_FORECAST) && daily.isEmpty()) ||
+            (wants(Section.HOURLY_FORECAST) && hourly.isEmpty())
+        val needOwmCurrent = wants(Section.CURRENT_CONDITIONS) && weewxCurrent == null && nwsObservation == null
+        var owmForecast: OwmForecast? = null
+        var owmCurrent: CurrentConditions? = null
+        val apiKey = config.owmApiKey?.takeIf { wants(Section.OWM_FALLBACK) }
+        if (apiKey != null && (needOwmForecast || needOwmCurrent)) {
+            val forecastJob = if (needOwmForecast) async { attempt { owm.forecast(point, apiKey) } } else null
+            val currentJob = if (needOwmCurrent) async { attempt { owm.current(point, apiKey) } } else null
+            forecastJob?.await()?.let { r ->
+                r.exceptionOrNull()?.let { issues += SourceIssue(DataSource.OWM, it.toUserMessage()) }
+                owmForecast = r.getOrNull()
+            }
+            currentJob?.await()?.let { r ->
+                r.exceptionOrNull()?.let { issues += SourceIssue(DataSource.OWM, it.toUserMessage()) }
+                owmCurrent = r.getOrNull()
+            }
+            owmForecast?.let { f ->
+                if (daily.isEmpty() && wants(Section.DAILY_FORECAST) && f.daily.isNotEmpty()) {
+                    daily = f.daily
+                    forecastSource = DataSource.OWM
+                }
+                if (hourly.isEmpty() && wants(Section.HOURLY_FORECAST)) hourly = f.hourly
+            }
+        } else if (outsideNws && config.owmApiKey == null) {
+            issues += SourceIssue(
+                DataSource.OWM,
+                "Outside the US, add an OpenWeatherMap API key in Settings › Data sources to get weather here.",
+            )
+        }
+
+        val upcomingHourly = hourly.filter { it.time.isAfter(now.minus(Duration.ofMinutes(59))) }
+        val current = chooseCurrent(weewxCurrent, nwsObservation, owmCurrent, upcomingHourly.takeIf { wants(Section.CURRENT_CONDITIONS) }.orEmpty(), now)
+            ?.let { withDaylight(it, location, now) }
+
+        val resolvedZone = zone ?: owmForecast?.zoneOffset ?: ZoneId.systemDefault()
+        val (sunrise, sunset) = Solar.sunTimes(
+            location.latitude, location.longitude, now.atZone(resolvedZone).toLocalDate(), resolvedZone,
+        )
+        val alerts = alertsResult?.getOrNull().orEmpty()
+        val skipped = Section.entries.filterNot(wants).toSet()
+
+        val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK).isNotEmpty()
+        if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true) {
+            throw WeatherUnavailableException(issues.ifEmpty { listOf(SourceIssue(DataSource.NWS, "No data available")) })
+        }
+
+        WeatherSnapshot(
+            locationId = location.id,
+            fetchedAt = now,
+            timeZoneId = resolvedZone.id,
+            placeName = meta?.point?.placeName ?: owmForecast?.cityName,
+            current = current,
+            hourly = upcomingHourly.take(48),
+            daily = OutageEstimator.annotate(
+                daily.filter { !it.date.isBefore(now.atZone(resolvedZone).toLocalDate().minusDays(1)) },
+                alerts,
+                resolvedZone,
+            ),
+            alerts = alerts,
+            alertsAvailable = meta != null || !outsideNws,
+            forecastSource = forecastSource,
+            radarStation = meta?.point?.radarStation,
+            issues = issues.distinct(),
+            liteMode = plan.limited,
+            sunrise = sunrise,
+            sunset = sunset,
+            skippedSections = skipped,
+        )
+    }
+
+    /**
+     * Priority: local WeeWX station > NWS observation > OpenWeatherMap >
+     * NWS hourly forecast (labelled as an estimate). A local station overrides
+     * the measured values; anything it doesn't measure (sky condition,
+     * visibility) is filled from the next source.
+     */
+    internal fun chooseCurrent(
+        weewx: CurrentConditions?,
+        nws: CurrentConditions?,
+        owm: CurrentConditions?,
+        hourly: List<HourlyForecast>,
+        now: Instant,
+    ): CurrentConditions? {
+        val freshNws = nws?.takeIf { it.temperatureC != null && it.isFresh(now, Duration.ofHours(2)) }
+        val estimate = hourly.firstOrNull()?.let { h ->
+            CurrentConditions(
+                observedAt = h.time,
+                source = DataSource.NWS_FORECAST_ESTIMATE,
+                description = h.shortForecast,
+                condition = h.condition,
+                isDaytime = h.isDaytime,
+                temperatureC = h.temperatureC,
+                humidityPercent = h.humidityPercent,
+                dewpointC = h.dewpointC,
+                windSpeedKph = h.windSpeedKph,
+                windDirectionDeg = app.northvane.core.model.Units.compassToDegrees(h.windDirection),
+            )
+        }
+        if (weewx != null) {
+            val supplement = freshNws ?: owm ?: nws ?: estimate
+            return if (supplement == null) weewx else weewx.copy(
+                description = weewx.description ?: supplement.description,
+                condition = weewx.condition.takeIf { it != WeatherCondition.UNKNOWN } ?: supplement.condition,
+                visibilityKm = weewx.visibilityKm ?: supplement.visibilityKm,
+                pressureHpa = weewx.pressureHpa ?: supplement.pressureHpa,
+                windGustKph = weewx.windGustKph ?: supplement.windGustKph,
+                uvIndex = weewx.uvIndex ?: supplement.uvIndex,
+                supplementedFrom = supplement.source,
+            )
+        }
+        return freshNws ?: owm ?: nws?.takeIf { it.temperatureC != null } ?: estimate
+    }
+
+    private fun withDaylight(c: CurrentConditions, location: SavedLocation, now: Instant): CurrentConditions =
+        if (c.source == DataSource.WEEWX || c.source == DataSource.NWS_FORECAST_ESTIMATE || c.condition == WeatherCondition.UNKNOWN) {
+            c.copy(isDaytime = Solar.isDaylight(location.latitude, location.longitude, c.observedAt ?: now))
+        } else {
+            c
+        }
+
+    private fun CurrentConditions.isFresh(now: Instant, maxAge: Duration): Boolean =
+        observedAt?.let { Duration.between(it, now) <= maxAge } ?: false
+
+    private suspend fun resolvePoint(point: GeoPoint, now: Instant): CachedNwsPoint {
+        val key = point.nwsKey()
+        val cached = pointCache.get(key)
+        if (cached != null && now.toEpochMilli() - cached.savedAtEpochMs < POINT_CACHE_MS) return cached
+        return try {
+            val fresh = nws.point(point)
+            val stations = runCatchingNonCancel { nws.stations(fresh) }.getOrDefault(cached?.stations.orEmpty())
+            CachedNwsPoint(fresh, stations, now.toEpochMilli()).also { pointCache.put(key, it) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: OutsideNwsCoverageException) {
+            throw e
+        } catch (e: Exception) {
+            // An old grid mapping is still far better than nothing.
+            cached ?: throw e
+        }
+    }
+
+    /** NWS stations sometimes report null temperature; try the next-nearest ones. */
+    private suspend fun latestObservation(meta: CachedNwsPoint, maxStations: Int, now: Instant): CurrentConditions {
+        var lastError: Throwable? = null
+        var best: CurrentConditions? = null
+        for (station in meta.stations.take(maxStations)) {
+            try {
+                val obs = nws.latestObservation(station)
+                if (obs.temperatureC != null && obs.isFresh(now, Duration.ofHours(2))) return obs
+                if (best == null) best = obs
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        return best ?: throw (lastError ?: WeatherApiException("No nearby observation stations"))
+    }
+
+    private companion object {
+        const val POINT_CACHE_MS = 14L * 24 * 60 * 60 * 1000
+    }
+}
+
+/** Like runCatching, but never swallows coroutine cancellation. */
+suspend fun <T> attempt(block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }
+
+private inline fun <T> runCatchingNonCancel(block: () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        Result.failure(e)
+    }

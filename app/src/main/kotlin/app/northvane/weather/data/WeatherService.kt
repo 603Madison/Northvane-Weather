@@ -1,0 +1,107 @@
+package app.northvane.weather.data
+
+import android.content.Context
+import app.northvane.core.model.SavedLocation
+import app.northvane.core.model.WeatherSnapshot
+import app.northvane.core.repo.FetchPlan
+import app.northvane.core.model.DetailSource
+import app.northvane.core.model.Section
+import app.northvane.core.outage.OutageEstimator
+import java.time.LocalDate
+import java.time.ZoneId
+import app.northvane.core.repo.SourceConfig
+import app.northvane.core.repo.WeatherRepository
+import app.northvane.core.weewx.WeeWxAuth
+import app.northvane.core.weewx.WeeWxSecret
+import app.northvane.weather.net.ConnectivityMonitor
+import app.northvane.weather.net.LocalNetworkAccess
+import app.northvane.weather.net.fetchPlanFor
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+import java.time.Duration
+import java.time.Instant
+
+/** Glues user settings, secrets and network state to the platform-independent repository. */
+class WeatherService(
+    private val context: Context,
+    private val repository: WeatherRepository,
+    private val cache: WeatherCache,
+    private val settings: SettingsRepository,
+    private val secrets: SecretStore,
+    private val locations: LocationStore,
+    private val connectivity: ConnectivityMonitor,
+) {
+    suspend fun cached(locationId: String): WeatherSnapshot? = cache.read(locationId)
+
+    fun currentPlan(settings: AppSettings): FetchPlan = fetchPlanFor(settings, connectivity.status.value)
+
+    /** How old cached data may be before opening the app triggers a refresh. */
+    fun refreshInterval(plan: FetchPlan): Duration =
+        if (plan.limited) Duration.ofMinutes(30) else Duration.ofMinutes(10)
+
+    suspend fun refresh(location: SavedLocation): WeatherSnapshot {
+        val appSettings = settings.settings.first()
+        val station = locations.stations.first().firstOrNull { it.enabled && it.linkedLocationId == location.id }
+        val config = withContext(Dispatchers.IO) {
+            SourceConfig(
+                weewxStation = station,
+                weewxSecret = station?.takeIf { it.auth != WeeWxAuth.NONE }
+                    ?.let { WeeWxSecret(secrets.get(SecretStore.weewxSecret(it.id))) },
+                owmApiKey = if (appSettings.owmEnabled) secrets.get(SecretStore.OWM_API_KEY) else null,
+                // Fail fast with an explanation rather than waiting out a blocked connection.
+                weewxBlockedReason = if (station != null && LocalNetworkAccess.needsPermissionFor(context, station.url)) {
+                    LocalNetworkAccess.DENIED_MESSAGE
+                } else {
+                    null
+                },
+            )
+        }
+        val plan = currentPlan(appSettings)
+        val fresh = repository.fetch(location, config, plan)
+        val merged = withCachedStandIns(fresh, cache.read(location.id))
+        cache.write(merged)
+        return merged
+    }
+
+    /**
+     * Sections skipped by satellite settings keep their last downloaded data
+     * (minus anything that has expired), so the screen never goes blank.
+     */
+    private fun withCachedStandIns(fresh: WeatherSnapshot, previous: WeatherSnapshot?): WeatherSnapshot {
+        if (previous == null || fresh.skippedSections.isEmpty()) return fresh
+        val now = Instant.now()
+        val zone = runCatching { ZoneId.of(fresh.timeZoneId) }.getOrDefault(ZoneId.systemDefault())
+        val skipped = fresh.skippedSections
+        var result = fresh
+        if (result.current == null && (Section.CURRENT_CONDITIONS in skipped || Section.LOCAL_STATION in skipped)) {
+            result = result.copy(current = previous.current)
+        }
+        if (Section.ALERTS in skipped) {
+            result = result.copy(alerts = previous.alerts.filter { (it.ends ?: it.expires)?.isAfter(now) != false })
+        }
+        if (Section.HOURLY_FORECAST in skipped) {
+            val cutoff = now.minus(Duration.ofMinutes(59))
+            result = result.copy(hourly = previous.hourly.filter { it.time.isAfter(cutoff) })
+        }
+        if (Section.DAILY_FORECAST in skipped) {
+            val yesterday = LocalDate.now(zone).minusDays(1)
+            result = result.copy(daily = previous.daily.filter { !it.date.isBefore(yesterday) }, forecastSource = previous.forecastSource)
+        } else if (Section.FORECAST_DETAILS in skipped) {
+            // Fresh forecast text, but keep earlier gridpoint numbers for the same days if we have them.
+            val earlier = previous.daily.filter { it.detailSource == DetailSource.GRID }.associateBy { it.date }
+            result = result.copy(
+                daily = result.daily.map { d ->
+                    val old = earlier[d.date] ?: return@map d
+                    if (d.detailSource == DetailSource.GRID) d else d.copy(
+                        windMaxKph = old.windMaxKph, gustMaxKph = old.gustMaxKph, windDirectionDeg = old.windDirectionDeg,
+                        precipitationMm = old.precipitationMm, snowMm = old.snowMm, iceMm = old.iceMm,
+                        humidityMin = old.humidityMin, humidityMax = old.humidityMax, thunderChance = old.thunderChance,
+                        skyCoverPercent = old.skyCoverPercent, detailSource = old.detailSource,
+                    )
+                },
+            )
+        }
+        return result.copy(daily = OutageEstimator.annotate(result.daily, result.alerts, zone))
+    }
+}

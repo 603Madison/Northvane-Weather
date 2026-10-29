@@ -1,0 +1,71 @@
+package app.northvane.weather
+
+import android.app.Application
+import app.northvane.core.net.HttpClients
+import app.northvane.core.nws.NwsClient
+import app.northvane.core.owm.OwmClient
+import app.northvane.core.radar.RadarService
+import app.northvane.core.repo.WeatherRepository
+import app.northvane.core.weewx.WeeWxClient
+import app.northvane.weather.data.AlertStateStore
+import app.northvane.weather.data.LocationStore
+import app.northvane.weather.data.SecretStore
+import app.northvane.weather.data.SettingsRepository
+import app.northvane.weather.data.WeatherCache
+import app.northvane.weather.data.WeatherService
+import app.northvane.weather.location.DeviceLocationProvider
+import app.northvane.weather.location.PlaceSearch
+import app.northvane.weather.net.ConnectivityMonitor
+import app.northvane.weather.work.AlertScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
+import java.io.File
+
+/** Manual dependency container; one instance per process, owned by [NorthvaneApp]. */
+class AppContainer(private val app: Application) {
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    val settings = SettingsRepository(app)
+    val secrets = SecretStore(app)
+    val locations = LocationStore(app)
+    val alertState = AlertStateStore(app)
+    val weatherCache = WeatherCache(app)
+    val connectivity = ConnectivityMonitor(app)
+    val deviceLocation = DeviceLocationProvider(app)
+
+    @Volatile
+    private var nwsContact: String? = null
+
+    private val http: OkHttpClient by lazy {
+        HttpClients.create(
+            userAgent = "Northvane/${BuildConfig.VERSION_NAME} (Android)",
+            cacheDir = File(app.cacheDir, "http"),
+        )
+    }
+
+    val nws: NwsClient by lazy { NwsClient(http, { NwsClient.userAgent(BuildConfig.VERSION_NAME, nwsContact) }) }
+    val owm: OwmClient by lazy { OwmClient(http) }
+    val weewx: WeeWxClient by lazy { WeeWxClient(HttpClients.localServerClients(http)) }
+    val radar: RadarService by lazy { RadarService(http) }
+
+    val repository: WeatherRepository by lazy {
+        WeatherRepository(nws, owm, weewx, weatherCache.pointCache)
+    }
+
+    val weather: WeatherService by lazy {
+        WeatherService(app, repository, weatherCache, settings, secrets, locations, connectivity)
+    }
+
+    val placeSearch: PlaceSearch by lazy { PlaceSearch(app, owm, secrets, settings) }
+
+    val alertScheduler: AlertScheduler by lazy { AlertScheduler(app, settings) }
+
+    init {
+        applicationScope.launch {
+            settings.settings.collect { nwsContact = it.nwsContact }
+        }
+    }
+}
