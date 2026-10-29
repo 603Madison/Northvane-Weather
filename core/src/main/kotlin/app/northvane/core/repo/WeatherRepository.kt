@@ -11,7 +11,14 @@ import app.northvane.core.model.SourceIssue
 import app.northvane.core.model.WeatherAlert
 import app.northvane.core.model.WeatherCondition
 import app.northvane.core.model.WeatherSnapshot
+import app.northvane.core.air.AirNowClient
+import app.northvane.core.air.EpaUvClient
+import app.northvane.core.air.OpenMeteoAirClient
 import app.northvane.core.history.AcisClient
+import app.northvane.core.model.AirQuality
+import app.northvane.core.model.UvForecast
+import app.northvane.core.net.InvalidCredentialsException
+import java.time.LocalDate
 import app.northvane.core.history.HistoryUnavailableException
 import app.northvane.core.outlook.Outlooks
 import app.northvane.core.outlook.Periods
@@ -68,6 +75,8 @@ data class SourceConfig(
     /** Null unless the user enabled pollen and entered a Google Pollen API key. */
     val pollenApiKey: String? = null,
     val pollenRestriction: AndroidKeyRestriction? = null,
+    /** Optional free EPA AirNow key; without it AQI comes from Open-Meteo's model. */
+    val airNowApiKey: String? = null,
 )
 
 @Serializable
@@ -90,6 +99,9 @@ class WeatherRepository(
     private val clock: () -> Instant = Instant::now,
     private val acis: AcisClient? = null,
     private val pollen: PollenClient? = null,
+    private val airNow: AirNowClient? = null,
+    private val epaUv: EpaUvClient? = null,
+    private val openMeteoAir: OpenMeteoAirClient? = null,
 ) {
     suspend fun alerts(point: GeoPoint): List<WeatherAlert> = nws.alerts(point.rounded())
 
@@ -129,6 +141,11 @@ class WeatherRepository(
             val days = if (today.monthValue in 2..5) 150 else AcisClient.DEFAULT_DAYS + 15
             async { attempt { client.history(point, today, days, includeSnowDepth = today.monthValue !in 6..9, now = now) } }
         }
+        val airJob = if (wants(Section.AIR_QUALITY) && (airNow != null || epaUv != null || openMeteoAir != null)) {
+            async { airAndUv(location, point, config, zone ?: ZoneId.systemDefault(), today, now) }
+        } else {
+            null
+        }
         val pollenJob = config.pollenApiKey?.takeIf { wants(Section.POLLEN) }?.let { key ->
             pollen?.let { client -> async { attempt { client.forecast(point, key, now, config.pollenRestriction) } } }
         }
@@ -146,6 +163,8 @@ class WeatherRepository(
         hourlyResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Hourly: ${it.toUserMessage()}") }
         gridResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Forecast details: ${it.toUserMessage()}") }
         observationResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Observations: ${it.toUserMessage()}") }
+        val airResult = airJob?.await()
+        airResult?.issues?.let { issues += it }
         val historyResult = historyJob?.await()
         val pollenResult = pollenJob?.await()
         historyResult?.exceptionOrNull()?.takeUnless { it is HistoryUnavailableException }
@@ -207,8 +226,8 @@ class WeatherRepository(
         val alerts = alertsResult?.getOrNull().orEmpty()
         val skipped = Section.entries.filterNot(wants).toSet()
 
-        val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK - Section.HISTORY - Section.POLLEN).isNotEmpty()
-        val gotExtras = historyResult?.isSuccess == true || pollenResult?.isSuccess == true
+        val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK - Section.HISTORY - Section.POLLEN - Section.AIR_QUALITY).isNotEmpty()
+        val gotExtras = historyResult?.isSuccess == true || pollenResult?.isSuccess == true || airResult?.air != null
         if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true && !gotExtras) {
             throw WeatherUnavailableException(issues.ifEmpty { listOf(SourceIssue(DataSource.NWS, "No data available")) })
         }
@@ -232,8 +251,48 @@ class WeatherRepository(
             skippedSections = skipped,
             history = historyResult?.getOrNull(),
             pollen = pollenResult?.getOrNull(),
+            airQuality = airResult?.air,
+            uv = airResult?.uv,
         )
         Outlooks.annotate(snapshot, location.latitude, location.longitude, now)
+    }
+
+    private class AirResult(val air: AirQuality?, val uv: UvForecast?, val issues: List<SourceIssue>)
+
+    /**
+     * AQI from EPA AirNow monitors when the user has a key, UV from EPA's ZIP
+     * code forecast; Open-Meteo's model fills whatever those can't (no key, no
+     * monitor nearby, no US ZIP code).
+     */
+    private suspend fun airAndUv(
+        location: SavedLocation,
+        point: GeoPoint,
+        config: SourceConfig,
+        zone: ZoneId,
+        today: LocalDate,
+        now: Instant,
+    ): AirResult = coroutineScope {
+        val issues = mutableListOf<SourceIssue>()
+        val airNowJob = config.airNowApiKey?.let { key -> airNow?.let { c -> async { attempt { c.airQuality(point, key, today, zone, now) } } } }
+        val zip = location.postalCode?.takeIf { it.matches(Regex("^\\d{5}$")) }
+        val uvJob = zip?.let { z -> epaUv?.let { c -> async { attempt { c.forecast(z, zone, now) } } } }
+        val airNowResult = airNowJob?.await()
+        val uvResult = uvJob?.await()
+        var air = airNowResult?.getOrNull()
+        var uv = uvResult?.getOrNull()
+        val airNowError = airNowResult?.exceptionOrNull()
+        if (airNowError is InvalidCredentialsException) issues += SourceIssue(DataSource.AIRNOW, airNowError.toUserMessage())
+        if ((air == null || uv == null) && openMeteoAir != null) {
+            val model = attempt { openMeteoAir.fetch(point, now) }
+            model.getOrNull()?.let { (modelAir, modelUv) ->
+                if (air == null) air = modelAir
+                if (uv == null) uv = modelUv
+            }
+            model.exceptionOrNull()?.let { issues += SourceIssue(DataSource.OPEN_METEO, "Air quality: ${it.toUserMessage()}") }
+        } else if (air == null && airNowError != null && airNowError !is InvalidCredentialsException) {
+            issues += SourceIssue(DataSource.AIRNOW, airNowError.toUserMessage())
+        }
+        AirResult(air, uv, issues)
     }
 
     /**

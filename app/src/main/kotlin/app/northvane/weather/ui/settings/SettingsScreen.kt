@@ -2,6 +2,7 @@
 
 package app.northvane.weather.ui.settings
 
+import androidx.compose.ui.graphics.Color
 import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -33,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +66,7 @@ import app.northvane.core.radar.SatelliteImagery
 import app.northvane.weather.ui.components.SectionCard
 import app.northvane.weather.ui.components.SegmentedChoice
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(
@@ -71,6 +74,8 @@ fun SettingsScreen(
     container: AppContainer,
     onBack: () -> Unit,
     onOpenSources: () -> Unit,
+    onOpenAllergies: () -> Unit = {},
+    onOpenThemes: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -103,12 +108,14 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->
@@ -121,7 +128,8 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             SectionCard("Appearance") {
-                Label("Theme")
+                NavRow("Theme", "${s.appTheme.label}: ${s.appTheme.description}", onOpenThemes)
+                Label("Light or dark")
                 SegmentedChoice(
                     options = ThemeMode.entries,
                     selected = s.themeMode,
@@ -293,6 +301,26 @@ fun SettingsScreen(
                     onCheckedChange = { enabled -> update { setFoliage(enabled) } },
                 )
                 LabeledSwitch(
+                    title = "Air quality (AQI)",
+                    subtitle = "EPA AirNow monitors with your free key, otherwise Open-Meteo's air quality model",
+                    checked = s.airQualityEnabled,
+                    onCheckedChange = { enabled -> update { setAirQuality(enabled) } },
+                )
+                LabeledSwitch(
+                    title = "UV index",
+                    subtitle = "EPA's hourly UV forecast for your ZIP code (no key needed)",
+                    checked = s.uvEnabled,
+                    onCheckedChange = { enabled -> update { setUv(enabled) } },
+                )
+                LabeledSwitch(
+                    title = "Allergy score",
+                    subtitle = if (s.allergies.isEmpty()) "Pick your allergies to get a personal daily score" else
+                        "Tracking: " + s.allergies.keys.joinToString(", ") { it.label.lowercase() },
+                    checked = s.allergyEnabled,
+                    onCheckedChange = { enabled -> update { setAllergy(enabled) } },
+                )
+                NavRow("My allergies", "Choose allergens and how strongly you react", onOpenAllergies)
+                LabeledSwitch(
                     title = "Pollen forecast",
                     subtitle = if (state.pollenKeySet || !s.pollenEnabled) {
                         "Tree, grass and weed pollen for 5 days (Google Pollen API, your own key)"
@@ -302,6 +330,30 @@ fun SettingsScreen(
                     checked = s.pollenEnabled,
                     onCheckedChange = { enabled -> update { setPollen(enabled) } },
                 )
+            }
+
+            SectionCard("Traffic") {
+                LabeledSwitch(
+                    title = "Traffic tab",
+                    subtitle = "Work zones, closures and crashes near your selected place, from state DOTs",
+                    checked = s.trafficEnabled,
+                    onCheckedChange = { enabled -> update { setTraffic(enabled) } },
+                )
+                if (s.trafficEnabled) {
+                    Label("Show events within")
+                    SegmentedChoice(
+                        options = listOf(16.0, 40.0, 80.0),
+                        selected = listOf(16.0, 40.0, 80.0).minBy { kotlin.math.abs(it - s.trafficRadiusKm) },
+                        label = { if (s.units == UnitSystem.IMPERIAL) "${(it / 1.609344).roundToInt()} mi" else "${it.roundToInt()} km" },
+                        onSelect = { km -> update { setTrafficRadius(km) } },
+                    )
+                    LabeledSwitch(
+                        title = "Live speed layer",
+                        subtitle = "Colors roads by current speed (TomTom, needs your key in Data sources)",
+                        checked = s.trafficFlowLayer,
+                        onCheckedChange = { enabled -> update { setTrafficFlow(enabled) } },
+                    )
+                }
             }
 
             SectionCard("Data sources") {
@@ -315,6 +367,7 @@ fun SettingsScreen(
                         Text("Weather sources & API keys", style = MaterialTheme.typography.bodyLarge)
                         Text(
                             "NWS (always on) · WeeWX local station · Google Pollen" + (if (state.pollenKeySet) " (on)" else " (off)") +
+                                " · EPA AirNow · New England 511 · TomTom" +
                                 " · OpenWeatherMap fallback" + if (s.owmEnabled) " (on)" else " (off)",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -435,8 +488,10 @@ fun SettingsScreen(
                 Text(
                     "No accounts, ads, analytics or trackers. Your locations, settings and keys stay on this device and are " +
                         "excluded from backups. Weather requests send rounded coordinates (about 11 m) only to the services " +
-                        "you use: weather.gov, NOAA's climate data service (ACIS), your WeeWX server and, if enabled, " +
-                        "OpenWeatherMap. Pollen requests send coordinates rounded to about 1 km to Google. Map tiles come " +
+                        "you use: weather.gov, NOAA's climate data service (ACIS), EPA (UV index by ZIP code, and AirNow if " +
+                        "you add a key), Open-Meteo (air quality model), state DOT traffic feeds, your WeeWX server and, if " +
+                        "enabled, OpenWeatherMap, New England 511 and TomTom. Pollen requests send coordinates rounded to " +
+                        "about 1 km to Google. Map tiles come " +
                         "from OpenFreeMap; radar and satellite imagery from NOAA and the Iowa Environmental Mesonet. Place " +
                         "search uses your device's built-in geocoder.",
                     style = MaterialTheme.typography.bodySmall,
@@ -451,6 +506,17 @@ fun SettingsScreen(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
     }
 }
 

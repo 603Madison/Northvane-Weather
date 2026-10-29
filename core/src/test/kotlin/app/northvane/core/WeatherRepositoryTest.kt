@@ -62,6 +62,9 @@ class WeatherRepositoryTest {
             clock = { NOW },
             acis = AcisClient(base).takeIf { extras },
             pollen = PollenClient(base).takeIf { extras },
+            airNow = app.northvane.core.air.AirNowClient(base).takeIf { extras },
+            epaUv = app.northvane.core.air.EpaUvClient(base).takeIf { extras },
+            openMeteoAir = app.northvane.core.air.OpenMeteoAirClient(base).takeIf { extras },
         )
     }
 
@@ -74,6 +77,7 @@ class WeatherRepositoryTest {
             on("data.rcc-acis.org/GridData", body = resource("/live/acis_grid_portland.json"))
             on("data.rcc-acis.org/MultiStnData", body = resource("/live/acis_snwd_whites.json"))
             on("pollen.googleapis.com/v1/forecast:lookup", body = resource("/pollen/google_forecast.json"))
+            airRoutes()
         }
         val key = "AIzaSyA-test-key-0123456789abcdefghijk"
         val snapshot = repo(fake, extras = true).fetch(kansas, SourceConfig(pollenApiKey = key), FetchPlan.FULL)
@@ -109,6 +113,48 @@ class WeatherRepositoryTest {
         assertTrue(snapshot.issues.any { it.source == DataSource.GOOGLE_POLLEN && "rejected" in it.message }, "${snapshot.issues}")
         // ACIS 404s here (no route): reported, but forecasts still work.
         assertTrue(snapshot.daily.isNotEmpty())
+    }
+
+    private fun FakeNetwork.airRoutes() {
+        on("www.airnowapi.org/aq/observation", body = resource("/air/airnow_current.json"))
+        on("www.airnowapi.org/aq/forecast", body = resource("/air/airnow_forecast.json"))
+        on("data.epa.gov/efservice/getEnvirofactsUVHOURLY/ZIP/66952", body = resource("/air/epa_uv_hourly.json"))
+        on("data.epa.gov/efservice/getEnvirofactsUVDAILY/ZIP/66952", body = resource("/air/epa_uv_daily.json"))
+        on("air-quality-api.open-meteo.com", body = resource("/air/openmeteo_aq.json"))
+    }
+
+    @Test
+    fun airNowAndEpaUvWithKeyAndZip() = runTest {
+        val fake = FakeNetwork().apply { nwsHappyPath(); airRoutes() }
+        val key = "0123ABCD-4567-89EF-0123-456789ABCDEF"
+        val snapshot = repo(fake, extras = true).fetch(kansas.copy(postalCode = "66952"), SourceConfig(airNowApiKey = key), FetchPlan.FULL)
+        assertEquals(app.northvane.core.model.AirSource.AIRNOW, snapshot.airQuality!!.source)
+        assertEquals(54, snapshot.airQuality!!.current!!.aqi)
+        assertEquals("EPA UV Index", snapshot.uv!!.source)
+        assertTrue(fake.requests.none { it.url.host == "air-quality-api.open-meteo.com" }, "no model needed")
+        val airNow = fake.requests.first { it.url.host == "www.airnowapi.org" }
+        assertEquals("no-store", airNow.header("Cache-Control"))
+        assertEquals("39.7456", airNow.url.queryParameter("latitude"))
+    }
+
+    @Test
+    fun withoutKeyOrZipOpenMeteoFillsIn() = runTest {
+        val fake = FakeNetwork().apply { nwsHappyPath(); airRoutes() }
+        val snapshot = repo(fake, extras = true).fetch(kansas, SourceConfig(), FetchPlan.FULL)
+        assertEquals(app.northvane.core.model.AirSource.OPEN_METEO, snapshot.airQuality!!.source)
+        assertEquals("Open-Meteo (CAMS)", snapshot.uv!!.source)
+        assertTrue(fake.requests.none { it.url.host == "www.airnowapi.org" || it.url.host == "data.epa.gov" })
+    }
+
+    @Test
+    fun badAirNowKeyIsReportedAndModelUsed() = runTest {
+        val fake = FakeNetwork().apply {
+            nwsHappyPath(); airRoutes()
+            on("www.airnowapi.org/aq/observation", code = 401, body = """{"WebServiceError":[{"Message":"Invalid API key"}]}""")
+        }
+        val snapshot = repo(fake, extras = true).fetch(kansas, SourceConfig(airNowApiKey = "0123ABCD-4567-89EF-0123-456789ABCDEF"), FetchPlan.FULL)
+        assertEquals(app.northvane.core.model.AirSource.OPEN_METEO, snapshot.airQuality!!.source)
+        assertTrue(snapshot.issues.any { it.source == DataSource.AIRNOW && "rejected" in it.message }, "${snapshot.issues}")
     }
 
     @Test
@@ -181,7 +227,7 @@ class WeatherRepositoryTest {
         assertTrue(fake.requests.none { it.url.encodedPath.endsWith("/forecast/hourly") })
         assertTrue(fake.requests.none { it.url.encodedPath == "/gridpoints/TOP/32,81" })
         assertEquals(
-            setOf(Section.HOURLY_FORECAST, Section.FORECAST_DETAILS, Section.LOCAL_STATION, Section.OWM_FALLBACK, Section.HISTORY, Section.POLLEN),
+            setOf(Section.HOURLY_FORECAST, Section.FORECAST_DETAILS, Section.LOCAL_STATION, Section.OWM_FALLBACK, Section.HISTORY, Section.POLLEN, Section.AIR_QUALITY),
             snapshot.skippedSections,
         )
         // Without grid data, numbers come from the forecast text (the fixture states winds).

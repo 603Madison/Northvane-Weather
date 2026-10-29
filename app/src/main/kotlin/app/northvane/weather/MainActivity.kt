@@ -15,6 +15,8 @@ import app.northvane.weather.ui.MainViewModel
 import app.northvane.weather.ui.NavRequest
 import app.northvane.weather.ui.NorthvaneRoot
 import app.northvane.weather.ui.theme.NorthvaneTheme
+import app.northvane.weather.ui.theme.ThemeWeather
+import app.northvane.core.model.WeatherCondition
 import app.northvane.weather.ui.theme.isAppInDarkTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -44,7 +46,22 @@ class MainActivity : ComponentActivity() {
                 enableEdgeToEdge(statusBarStyle = style, navigationBarStyle = style)
             }
 
-            NorthvaneTheme(darkTheme = dark, dynamicColor = state.settings.dynamicColor) {
+            val settings = state.settings
+            val current = state.snapshot?.current
+            val weather = ThemeWeather(
+                condition = current?.condition ?: state.snapshot?.daily?.firstOrNull()?.condition ?: WeatherCondition.CLEAR,
+                isDay = current?.isDaytime ?: true,
+                temperatureC = current?.temperatureC ?: state.snapshot?.hourly?.firstOrNull()?.temperatureC,
+            )
+            NorthvaneTheme(
+                darkTheme = dark,
+                dynamicColor = settings.dynamicColor,
+                theme = settings.appTheme,
+                weather = weather,
+                customAccent = settings.customAccent,
+                customBackground = settings.customBackground,
+                customDimPercent = settings.customDimPercent,
+            ) {
                 NorthvaneRoot(
                     vm = vm,
                     container = container,

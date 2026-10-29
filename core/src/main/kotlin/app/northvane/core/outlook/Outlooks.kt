@@ -20,7 +20,7 @@ object Outlooks {
 
         val mud = MudEstimator.forecast(s.history, days, today)
         val foliage = FoliageEstimator.report(latitude, s.history, days, today)
-        val ctx = ActivityScorer.Context(latitude, longitude, zone, s.alerts)
+        val ctx = ActivityScorer.Context(latitude, longitude, zone, s.alerts, WaterIce.forecast(s.history, days, today))
         val outage = OutageContext(
             leafCover = { date -> FoliageEstimator.leafCover(date, latitude, elevation, foliage) },
             mud = mud,

@@ -2,6 +2,8 @@
 
 package app.northvane.weather.ui.radar
 
+import androidx.compose.ui.graphics.Color
+import app.northvane.weather.ui.theme.LocalIsDark
 import android.text.format.DateFormat
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
@@ -77,7 +79,7 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
     val context = LocalContext.current
     var loadOnSatellite by rememberSaveable { mutableStateOf(false) }
     val location = state.selected
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val dark = LocalIsDark.current
     val zone = remember(state.snapshot?.timeZoneId) {
         state.snapshot?.timeZoneId?.let { runCatching { ZoneId.of(it) }.getOrNull() } ?: ZoneId.systemDefault()
     }
@@ -94,6 +96,7 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
@@ -111,7 +114,7 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
                         SourceMenu(radar.source, vm::setSource, onOpenSettings)
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->

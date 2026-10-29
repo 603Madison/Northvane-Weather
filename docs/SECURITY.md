@@ -50,7 +50,7 @@ weather services described below.
 
 ## Secrets
 
-- The OpenWeatherMap key, the Google Pollen API key and WeeWX passwords/tokens are encrypted with
+- The OpenWeatherMap, Google Pollen, EPA AirNow, New England 511 and TomTom keys and WeeWX passwords/tokens are encrypted with
   AES-256-GCM under a non-exportable **Android Keystore** key
   (`SecretStore`). The entry name is bound as associated data.
 - Secrets are write-only in the UI: screens show whether a value is saved,
@@ -99,6 +99,19 @@ weather services described below.
   per place), tiles.openfreemap.org (basemap), the user's WeeWX server,
   pollen.googleapis.com (only with the user's key; coordinates rounded to
   about 1 km) and api.openweathermap.org (only if enabled with the user's key).
+- Air quality and UV: data.epa.gov (UV by ZIP code; the ZIP is derived on the
+  device), air-quality-api.open-meteo.com (rounded coordinates), and
+  www.airnowapi.org only with the user's key (the key must go in the URL, so
+  those requests are `no-store`).
+- Traffic (only while the Traffic tab is used): datahub.transportation.gov
+  (USDOT WZDx registry), the keyless state DOT WZDx feeds it lists (HTTPS
+  only), newengland511.org with the user's key (`no-store`), and TomTom tiles
+  with the user's key (the key is part of the tile URL by TomTom's design).
+  Traffic requests don't include your coordinates except TomTom tile
+  addresses, which reveal the map area being viewed.
+- The custom theme photo is copied into `noBackupFilesDir` after decoding and
+  re-encoding, which strips EXIF metadata such as GPS position. The app uses
+  the system photo picker and holds no media permission.
 - All of these hosts are HTTPS-only with system CAs in the network security config.
 - Place search uses the platform `Geocoder` (on most devices this is backed
   by the system location provider) and OpenWeatherMap geocoding only if the

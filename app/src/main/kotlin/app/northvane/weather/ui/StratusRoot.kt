@@ -2,7 +2,24 @@
 
 package app.northvane.weather.ui
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
+import app.northvane.weather.ui.settings.AllergiesScreen
+import app.northvane.weather.ui.settings.ThemesScreen
+import app.northvane.weather.ui.theme.LocalBackdrop
+import app.northvane.weather.ui.theme.LocalIsDark
+import app.northvane.weather.ui.traffic.TrafficScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
@@ -50,6 +67,9 @@ object Routes {
     const val LOCATIONS = "locations"
     const val SETTINGS = "settings"
     const val SOURCES = "sources"
+    const val TRAFFIC = "traffic"
+    const val ALLERGIES = "allergies"
+    const val THEMES = "themes"
 }
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
@@ -57,6 +77,7 @@ private data class Tab(val route: String, val label: String, val icon: ImageVect
 private val tabs = listOf(
     Tab(Routes.TODAY, "Today", Icons.Filled.Home),
     Tab(Routes.RADAR, "Radar", NorthvaneIcons.Radar),
+    Tab(Routes.TRAFFIC, "Traffic", NorthvaneIcons.Traffic),
     Tab(Routes.ALERTS, "Alerts", Icons.Filled.Warning),
 )
 
@@ -100,12 +121,15 @@ fun NorthvaneRoot(
         }
     }
 
+    val visibleTabs = if (state.settings.trafficEnabled) tabs else tabs.filterNot { it.route == Routes.TRAFFIC }
+    ThemeBackdrop(container, state.settings.customPhotoVersion)
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
-            if (route == null || tabs.any { it.route == route }) {
-                NavigationBar {
-                    tabs.forEach { tab ->
+            if (route == null || visibleTabs.any { it.route == route }) {
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.97f)) {
+                    visibleTabs.forEach { tab ->
                         NavigationBarItem(
                             selected = route == tab.route,
                             onClick = { navController.navigateToTab(tab.route) },
@@ -135,10 +159,20 @@ fun NorthvaneRoot(
                     onOpenLocations = { navController.navigate(Routes.LOCATIONS) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
                     onOpenSources = { navController.navigate(Routes.SOURCES) },
+                    onOpenAllergies = { navController.navigate(Routes.ALLERGIES) },
                 )
             }
             composable(Routes.RADAR) {
                 RadarScreen(state = state, container = container, onOpenSettings = { navController.navigate(Routes.SETTINGS) })
+            }
+            composable(Routes.TRAFFIC) {
+                TrafficScreen(state = state, container = container, onOpenSettings = { navController.navigate(Routes.SETTINGS) })
+            }
+            composable(Routes.ALLERGIES) {
+                AllergiesScreen(state = state, container = container, onBack = { navController.popBackStack() })
+            }
+            composable(Routes.THEMES) {
+                ThemesScreen(state = state, container = container, onBack = { navController.popBackStack() })
             }
             composable(Routes.ALERTS) {
                 AlertsScreen(
@@ -156,6 +190,8 @@ fun NorthvaneRoot(
                     container = container,
                     onBack = { navController.popBackStack() },
                     onOpenSources = { navController.navigate(Routes.SOURCES) },
+                    onOpenAllergies = { navController.navigate(Routes.ALLERGIES) },
+                    onOpenThemes = { navController.navigate(Routes.THEMES) },
                 )
             }
             composable(Routes.SOURCES) {
@@ -165,6 +201,27 @@ fun NorthvaneRoot(
                     onBack = { navController.popBackStack() },
                     onSourcesChanged = { vm.refresh() },
                 )
+            }
+        }
+    }
+}
+
+/**
+ * Everything behind the screens: the theme's gradient, or the custom photo
+ * with a scrim so text stays readable.
+ */
+@Composable
+private fun ThemeBackdrop(container: AppContainer, photoVersion: Long) {
+    val backdrop = LocalBackdrop.current
+    val dark = LocalIsDark.current
+    Box(Modifier.fillMaxSize().background(backdrop.brush)) {
+        if (backdrop.photo) {
+            val image by produceState<ImageBitmap?>(null, photoVersion) {
+                value = withContext(Dispatchers.IO) { container.themeBackground.load()?.asImageBitmap() }
+            }
+            image?.let { bitmap ->
+                Image(bitmap, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                Box(Modifier.fillMaxSize().background((if (dark) Color.Black else Color.White).copy(alpha = backdrop.dim)))
             }
         }
     }

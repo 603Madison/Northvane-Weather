@@ -9,15 +9,16 @@ import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import app.northvane.weather.data.ThemeMode
 
-private val LightColors = lightColorScheme(
+internal val LightColors = lightColorScheme(
     primary = Color(0xFF2563EB),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFDCE6FF),
@@ -47,7 +48,7 @@ private val LightColors = lightColorScheme(
     onError = Color.White,
 )
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Color(0xFF8DB4FF),
     onPrimary = Color(0xFF0A1E4A),
     primaryContainer = Color(0xFF1D3B85),
@@ -101,16 +102,37 @@ fun isAppInDarkTheme(mode: ThemeMode): Boolean = when (mode) {
 fun NorthvaneTheme(
     darkTheme: Boolean,
     dynamicColor: Boolean,
+    theme: AppTheme = AppTheme.NORTHVANE,
+    weather: ThemeWeather = ThemeWeather(),
+    customAccent: Long = CustomAccents.first(),
+    customBackground: CustomBackground = CustomBackground.DUSK,
+    customDimPercent: Int = 35,
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
+    val base = if (darkTheme) DarkColors else LightColors
+    val photo = theme == AppTheme.CUSTOM && customBackground == CustomBackground.PHOTO
+    val p = palette(theme, darkTheme, weather, customAccent, customBackground)
     val colors = when {
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        darkTheme -> DarkColors
-        else -> LightColors
+        theme == AppTheme.NORTHVANE -> base
+        else -> schemeFrom(base, p, darkTheme, translucentCards = photo)
     }
-    MaterialTheme(colorScheme = colors, typography = NorthvaneTypography, content = content)
+    val backdrop = if (dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Backdrop(Brush.verticalGradient(listOf(colors.background, colors.background)), colors.background)
+    } else {
+        Backdrop(
+            brush = Brush.verticalGradient(listOf(p.backgroundTop, p.backgroundBottom)),
+            base = p.backgroundBottom,
+            photo = photo,
+            dim = customDimPercent.coerceIn(0, 80) / 100f,
+            hero = p.hero,
+        )
+    }
+    CompositionLocalProvider(LocalIsDark provides darkTheme, LocalBackdrop provides backdrop) {
+        MaterialTheme(colorScheme = colors, typography = NorthvaneTypography, content = content)
+    }
 }
 
 /**
@@ -124,7 +146,7 @@ fun WarningTheme(active: Boolean, content: @Composable () -> Unit) {
         return
     }
     val base = MaterialTheme.colorScheme
-    val dark = base.background.luminance() < 0.5f
+    val dark = LocalIsDark.current
     val scheme = if (dark) {
         base.copy(
             primary = Color(0xFFFF8A80), onPrimary = Color(0xFF5C0000),

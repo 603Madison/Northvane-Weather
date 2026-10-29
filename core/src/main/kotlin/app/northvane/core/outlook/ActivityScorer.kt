@@ -37,6 +37,8 @@ object ActivityScorer {
         val longitude: Double,
         val zone: ZoneId,
         val alerts: List<WeatherAlert>,
+        /** Ice balance per day from [WaterIce]. */
+        val waterIce: Map<LocalDate, Double> = emptyMap(),
     )
 
     fun score(day: DailyForecast, mud: MudOutlook?, ctx: Context, activities: Collection<Activity> = Activity.entries): List<ActivityScore> {
@@ -51,7 +53,7 @@ object ActivityScorer {
                 Activity.CAMPING -> camping(card, period, mud, day.date, ctx)
                 Activity.OFF_ROADING -> offRoading(card, period, mud, day.date, ctx)
                 Activity.MOUNTAIN_BIKING -> biking(card, period, mud, day.date, ctx)
-                Activity.PADDLING -> paddling(card, period, day.date)
+                Activity.PADDLING -> paddling(card, period, day.date, ctx)
                 Activity.STARGAZING -> stargazing(card, period, window)
             }
             val warned = ctx.alerts.any { a ->
@@ -200,7 +202,14 @@ object ActivityScorer {
         seasonal(c, date, hot, ctx.latitude, bugs = false)
     }
 
-    private fun paddling(c: Scorecard, p: PeriodStats, date: LocalDate) {
+    private fun paddling(c: Scorecard, p: PeriodStats, date: LocalDate, ctx: Context) {
+        // A sustained freeze ices over lakes and fills rivers with ice floes: no paddling at all.
+        val ice = ctx.waterIce[date] ?: 0.0
+        if (ice >= WaterIce.FROZEN) {
+            c.lose(100.0, Tip(Kind.ICE_ON_WATER))
+            return
+        }
+        if (ice >= WaterIce.SHORE_ICE) c.lose(25.0, Tip(Kind.SHORE_ICE))
         val wind = mph(p.windMeanKph ?: p.windMaxKph?.let { it * 0.75 })
         val gust = mph(p.gustMaxKph)
         val rough = (wind ?: 0.0) >= 12 || (gust ?: 0.0) >= 22

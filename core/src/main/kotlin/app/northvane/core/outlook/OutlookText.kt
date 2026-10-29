@@ -64,6 +64,18 @@ object OutlookText {
             Kind.MOONLIT -> "Moon ${pct()} lit: fine for bright objects and planets"
             Kind.OFFSHORE_WIND -> "Stay near shore and watch for offshore wind on bigger lakes and the coast"
             Kind.DRY_BAG -> "Pack a dry bag and rain shell"
+            Kind.ICE_ON_WATER -> "Too cold for too long: lakes may be iced over and rivers can carry dangerous ice. Stay off the water"
+            Kind.SHORE_ICE -> "Skim ice likely in coves and along shores"
+            Kind.ALLERGY_WINDOWS -> "Keep windows closed and run AC or a HEPA filter"
+            Kind.ALLERGY_SHOWER -> "Shower and change clothes after time outside"
+            Kind.ALLERGY_MEDICATE -> "Take allergy medicine before symptoms start"
+            Kind.ALLERGY_TIMING -> "Pollen peaks late morning to afternoon: head out early or after rain"
+            Kind.ALLERGY_RAIN_HELPS -> "Steady rain will wash pollen out of the air"
+            Kind.ALLERGY_WIND -> "Dry, gusty wind (to ${f.windSpeed(v)}) will spread pollen"
+            Kind.ALLERGY_MASK_YARDWORK -> "Damp leaf litter: wear a mask for raking and yard work"
+            Kind.ALLERGY_THUNDERSTORM -> "Thunderstorms with high pollen can trigger asthma: keep your inhaler handy"
+            Kind.ALLERGY_AIR -> "Air quality is unhealthy for sensitive groups (AQI ${v?.roundToInt()}): limit hard outdoor exertion"
+            Kind.ALLERGY_QUIET -> "A quiet day for your allergies"
         }.let { if (imperial) it else metricize(it) }
     }
 

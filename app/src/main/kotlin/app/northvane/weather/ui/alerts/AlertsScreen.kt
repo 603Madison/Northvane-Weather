@@ -2,6 +2,7 @@
 
 package app.northvane.weather.ui.alerts
 
+import app.northvane.weather.ui.theme.LocalIsDark
 import android.text.format.DateFormat
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
@@ -73,6 +74,7 @@ fun AlertsScreen(state: MainUiState, onRefresh: () -> Unit, onOpenSettings: () -
     val notificationsAllowed = remember(state.settings) { AlertNotifier.canNotify(context) }
 
     Scaffold(
+        containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             TopAppBar(
@@ -84,7 +86,7 @@ fun AlertsScreen(state: MainUiState, onRefresh: () -> Unit, onOpenSettings: () -
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->

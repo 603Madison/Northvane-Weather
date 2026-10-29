@@ -34,6 +34,7 @@ class WeatherService(
     private val secrets: SecretStore,
     private val locations: LocationStore,
     private val connectivity: ConnectivityMonitor,
+    private val placeSearch: app.northvane.weather.location.PlaceSearch,
 ) {
     suspend fun cached(locationId: String): WeatherSnapshot? = cache.read(locationId)
 
@@ -43,8 +44,19 @@ class WeatherService(
     fun refreshInterval(plan: FetchPlan): Duration =
         if (plan.limited) Duration.ofMinutes(30) else Duration.ofMinutes(10)
 
-    suspend fun refresh(location: SavedLocation): WeatherSnapshot {
+    private val zipLookups = mutableSetOf<String>()
+
+    /** Looks up (once per run) and saves the location's US ZIP code for EPA's UV forecast. */
+    private suspend fun withPostalCode(location: SavedLocation): SavedLocation {
+        if (location.postalCode != null || !zipLookups.add("${location.id}@${location.latitude},${location.longitude}")) return location
+        val zip = placeSearch.postalCode(location.latitude, location.longitude) ?: return location
+        locations.updateLocation(location.id) { it.copy(postalCode = zip) }
+        return location.copy(postalCode = zip)
+    }
+
+    suspend fun refresh(requested: SavedLocation): WeatherSnapshot {
         val appSettings = settings.settings.first()
+        val location = if (appSettings.uvEnabled) withPostalCode(requested) else requested
         val station = WeeWxStation.forLocation(locations.stations.first(), location)
         val config = withContext(Dispatchers.IO) {
             SourceConfig(
@@ -54,6 +66,7 @@ class WeatherService(
                 owmApiKey = if (appSettings.owmEnabled) secrets.get(SecretStore.OWM_API_KEY) else null,
                 pollenApiKey = if (appSettings.pollenEnabled) secrets.get(SecretStore.POLLEN_API_KEY) else null,
                 pollenRestriction = AppSignature.restriction(context),
+                airNowApiKey = secrets.get(SecretStore.AIRNOW_API_KEY),
                 // Fail fast with an explanation rather than waiting out a blocked connection.
                 weewxBlockedReason = if (station != null && LocalNetworkAccess.needsPermissionFor(context, station.url)) {
                     LocalNetworkAccess.DENIED_MESSAGE
@@ -63,7 +76,9 @@ class WeatherService(
             )
         }
         val previous = cache.read(location.id)
-        val plan = throttled(currentPlan(appSettings), previous)
+        val plan = throttled(currentPlan(appSettings), previous).let { p ->
+            if (!appSettings.airQualityEnabled && !appSettings.uvEnabled) p.copy(sections = p.sections - Section.AIR_QUALITY) else p
+        }
         val fresh = repository.fetch(location, config, plan)
         val merged = Outlooks.annotate(
             withSlowSections(withCachedStandIns(fresh, previous), previous, pollenWanted = config.pollenApiKey != null),
@@ -87,6 +102,8 @@ class WeatherService(
         var sections = plan.sections
         if (recent(previous.history?.fetchedAt)) sections = sections - Section.HISTORY
         if (recent(previous.pollen?.fetchedAt)) sections = sections - Section.POLLEN
+        val air = previous.airQuality?.fetchedAt ?: previous.uv?.fetchedAt
+        if (air != null && Duration.between(air, now) < Duration.ofMinutes(30)) sections = sections - Section.AIR_QUALITY
         return plan.copy(sections = sections)
     }
 
@@ -100,8 +117,15 @@ class WeatherService(
         val pollen = fresh.pollen ?: previous.pollen?.takeIf { pollenWanted }
             ?.let { p -> p.copy(days = p.days.filter { !it.date.isBefore(today) }) }
             ?.takeIf { it.days.isNotEmpty() }
-        val throttled = setOf(Section.HISTORY, Section.POLLEN)
-        return fresh.copy(history = history, pollen = pollen, skippedSections = fresh.skippedSections - throttled)
+        // Air quality and UV are short-lived: keep the last values for up to 3 hours.
+        val airAge = Duration.ofHours(3)
+        val airQuality = fresh.airQuality ?: previous.airQuality?.takeIf { Duration.between(it.fetchedAt, now) < airAge }
+        val uv = fresh.uv ?: previous.uv?.takeIf { Duration.between(it.fetchedAt, now) < airAge }
+        val throttled = setOf(Section.HISTORY, Section.POLLEN, Section.AIR_QUALITY)
+        return fresh.copy(
+            history = history, pollen = pollen, airQuality = airQuality, uv = uv,
+            skippedSections = fresh.skippedSections - throttled,
+        )
     }
 
     /**

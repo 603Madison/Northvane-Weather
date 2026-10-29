@@ -2,6 +2,8 @@
 
 package app.northvane.weather.ui.home
 
+import app.northvane.weather.ui.theme.LocalIsDark
+import app.northvane.weather.ui.theme.LocalBackdrop
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -103,6 +105,7 @@ import app.northvane.weather.ui.theme.WarningTheme
 import app.northvane.weather.ui.theme.skyGradient
 import app.northvane.weather.ui.theme.warningGradient
 import app.northvane.core.model.AlertCategory
+import app.northvane.core.outlook.AllergyEstimator
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.roundToInt
@@ -125,12 +128,13 @@ fun HomeScreen(
     onOpenLocations: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSources: () -> Unit = onOpenSettings,
+    onOpenAllergies: () -> Unit = onOpenSettings,
 ) {
     val snapshot = state.snapshot
     // A warning (not a watch, advisory or statement) turns the Today screen red.
     val warning = remember(snapshot?.alerts, snapshot?.fetchedAt) { snapshot?.hasActiveWarning(Instant.now()) == true }
     WarningTheme(active = warning) {
-        HomeContent(state, actions, warning, onOpenAlerts, onOpenLocations, onOpenSettings, onOpenSources)
+        HomeContent(state, actions, warning, onOpenAlerts, onOpenLocations, onOpenSettings, onOpenSources, onOpenAllergies)
     }
 }
 
@@ -143,6 +147,7 @@ private fun HomeContent(
     onOpenLocations: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenSources: () -> Unit,
+    onOpenAllergies: () -> Unit,
 ) {
     val context = LocalContext.current
     val snapshot = state.snapshot
@@ -179,6 +184,8 @@ private fun HomeContent(
     }
 
     Scaffold(
+        // The theme background shows through, except during a warning (red screen).
+        containerColor = if (warning) MaterialTheme.colorScheme.background else Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         topBar = {
             LocationTopBar(
@@ -243,6 +250,24 @@ private fun HomeContent(
                                     showOutage = settings.outageRiskEnabled,
                                     activities = activities,
                                     showMud = settings.mudEnabled,
+                                )
+                            }
+                        }
+                        val air = snapshot.airQuality
+                        if (settings.airQualityEnabled && air != null) {
+                            item { AirQualitySection(air, time) }
+                        }
+                        val uv = snapshot.uv
+                        if (settings.uvEnabled && uv != null) {
+                            item { UvSection(uv, time) }
+                        }
+                        if (settings.allergyEnabled) {
+                            item {
+                                val allergyDays = remember(snapshot, settings.allergies) {
+                                    AllergyEstimator.forecast(settings.allergies, snapshot.daily, snapshot.pollen, snapshot.airQuality, time.today())
+                                }
+                                AllergySection(
+                                    allergyDays, settings.allergies.isNotEmpty(), state.pollenKeySet, formatter, time, onOpenAllergies,
                                 )
                             }
                         }
@@ -349,7 +374,7 @@ private fun LocationTopBar(
             }
             IconButton(onClick = onOpenSettings) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
         },
-        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
     )
 }
 
@@ -359,8 +384,15 @@ private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeForm
     val today = snapshot.daily.firstOrNull { it.date == time.today() } ?: snapshot.daily.firstOrNull()
     val condition = current?.condition ?: today?.condition ?: WeatherCondition.UNKNOWN
     val isDay = current?.isDaytime ?: true
-    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val gradient = remember(condition, isDay, dark, warning) { if (warning) warningGradient(dark) else skyGradient(condition, isDay, dark) }
+    val dark = LocalIsDark.current
+    val themeHero = LocalBackdrop.current.hero
+    val gradient = remember(condition, isDay, dark, warning, themeHero) {
+        when {
+            warning -> warningGradient(dark)
+            themeHero != null -> themeHero
+            else -> skyGradient(condition, isDay, dark)
+        }
+    }
     val onHero = Color.White
 
     Box(
@@ -415,7 +447,7 @@ private fun SourceBadge(current: CurrentConditions, time: TimeFormat) {
         DataSource.NWS -> current.stationName ?: "NWS observation"
         DataSource.OWM -> "OpenWeatherMap"
         DataSource.NWS_FORECAST_ESTIMATE -> "Estimated from NWS forecast"
-        DataSource.NOAA_ACIS, DataSource.GOOGLE_POLLEN -> current.source.displayName
+        else -> current.source.displayName
     }
     val age = current.observedAt?.let { " · ${TimeFormat.ago(it)}" }.orEmpty()
     Surface(shape = RoundedCornerShape(50), color = Color.White.copy(alpha = 0.18f)) {

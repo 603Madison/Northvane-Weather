@@ -3,6 +3,18 @@
 All notable changes to Northvane. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-10-29
+
+### Added
+- **Personal allergy score**: pick your allergens (birch, oak, maple, grass, ragweed, outdoor mold, air pollution and more) and how strongly you react; get a daily 0–100 score with the main culprits and tips. Pollen comes from the Google Pollen API (plant-level where reported), mold is estimated from season, humidity, rain and leaf litter, and rain, dry wind, thunderstorms and poor air quality adjust the score.
+- **Air quality (AQI)** card: EPA AirNow monitors and forecasts with your free key, otherwise Open-Meteo's CAMS model (no key).
+- **UV index** card: EPA's hourly UV forecast for your ZIP code (no key), with today's peak and sun-protection advice.
+- **Themes**: 7 static themes (Northvane, Harbor, Evergreen, Maple, Lupine, Aurora, Driftwood), 2 weather themes that change with conditions (Live sky, Temperature), and a Custom theme with your accent color and a gradient or your own photo as the background.
+- **Traffic tab** (can be turned off): work zones from state DOT WZDx feeds found through USDOT's registry (no key; NH/VT/ME publish one), crashes and closures from New England 511 (free key), and an optional live speed layer from TomTom (your key; free tier explained in Settings).
+
+### Changed
+- Paddling scores 0 when it has been below freezing long enough for lakes to ice over or rivers to carry ice, and stays there until spring ice-out; shore ice lowers the score earlier.
+
 ## [1.1.0] - 2026-10-29
 
 ### Added

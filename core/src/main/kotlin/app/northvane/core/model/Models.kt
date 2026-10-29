@@ -17,6 +17,9 @@ enum class DataSource(val displayName: String) {
     NWS_FORECAST_ESTIMATE("NWS hourly forecast"),
     NOAA_ACIS("NOAA climate data (ACIS)"),
     GOOGLE_POLLEN("Google Pollen API"),
+    AIRNOW("EPA AirNow"),
+    EPA_UV("EPA UV Index"),
+    OPEN_METEO("Open-Meteo"),
 }
 
 @Serializable
@@ -65,6 +68,8 @@ data class SavedLocation(
     val nickname: String? = null,
     /** Whether background alert checks (and notifications) cover this location. */
     val notify: Boolean = true,
+    /** US ZIP code, looked up on the device, for EPA's UV index forecast. */
+    val postalCode: String? = null,
 ) {
     val displayName: String get() = nickname?.takeIf { it.isNotBlank() } ?: name
 
@@ -160,6 +165,8 @@ enum class Section {
     /** Recent observed weather (NOAA ACIS), for mud, foliage and seasonal outage estimates. */
     HISTORY,
     POLLEN,
+    /** Air quality index and UV index. */
+    AIR_QUALITY,
 }
 
 @Serializable
@@ -248,6 +255,8 @@ data class WeatherSnapshot(
     val foliage: FoliageReport? = null,
     val latitude: Double? = null,
     val elevationM: Double? = null,
+    val airQuality: AirQuality? = null,
+    val uv: UvForecast? = null,
 ) {
     /** True while an NWS warning (not a watch, advisory or statement) is in effect. */
     fun hasActiveWarning(now: Instant): Boolean = alerts.any { a ->

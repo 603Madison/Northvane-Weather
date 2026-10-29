@@ -13,6 +13,13 @@ import androidx.datastore.preferences.preferencesDataStore
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.model.UnitSystem
 import app.northvane.core.model.Activity
+import app.northvane.core.model.Allergen
+import app.northvane.core.model.Sensitivity
+import app.northvane.weather.ui.theme.AppTheme
+import app.northvane.weather.ui.theme.CustomAccents
+import app.northvane.weather.ui.theme.CustomBackground
+import androidx.datastore.preferences.core.doublePreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import app.northvane.core.radar.RadarSource
 import app.northvane.core.radar.SatelliteImagery
 import kotlinx.coroutines.flow.Flow
@@ -43,6 +50,9 @@ enum class SatelliteFeature(val title: String, val description: String, val appr
     RADAR("Radar", "Past hour of radar images", "0.5–3 MB per view", false),
     FUTURE_CAST("Radar future cast", "HRRR model radar for the next hours", "0.5–2 MB per view", false),
     SATELLITE_IMAGERY("Satellite imagery", "GOES cloud imagery under the radar", "0.3–2 MB per view", false),
+    AIR_QUALITY("Air quality & UV", "AQI (EPA AirNow or Open-Meteo) and EPA UV index; at most every 30 minutes", "~3 KB", true),
+    TRAFFIC("Traffic events", "Work zones, closures and incidents from state DOT feeds", "50–700 KB per view", false),
+    TRAFFIC_FLOW("Traffic speed map", "TomTom flow tiles on the traffic map, if you've added a key", "0.3–1 MB per view", false),
     OWM_FALLBACK("OpenWeatherMap fallback", "Only if enabled in Data sources", "~5 KB", false);
 
     companion object {
@@ -74,6 +84,19 @@ data class AppSettings(
     val foliageEnabled: Boolean = true,
     val satelliteLayer: Boolean = false,
     val satelliteImagery: SatelliteImagery = SatelliteImagery.AUTO,
+    val appTheme: AppTheme = AppTheme.NORTHVANE,
+    val customAccent: Long = CustomAccents.first(),
+    val customBackground: CustomBackground = CustomBackground.DUSK,
+    val customDimPercent: Int = 35,
+    /** Bumped whenever the custom background photo changes, so it's reloaded. */
+    val customPhotoVersion: Long = 0,
+    val airQualityEnabled: Boolean = true,
+    val uvEnabled: Boolean = true,
+    val allergyEnabled: Boolean = true,
+    val allergies: Map<Allergen, Sensitivity> = emptyMap(),
+    val trafficEnabled: Boolean = true,
+    val trafficRadiusKm: Double = 40.0,
+    val trafficFlowLayer: Boolean = true,
 ) {
     companion object {
         private fun defaultUnits(): UnitSystem =
@@ -110,6 +133,18 @@ class SettingsRepository(context: Context) {
         val foliage = booleanPreferencesKey("foliage")
         val satelliteLayer = booleanPreferencesKey("satellite_layer")
         val satelliteImagery = stringPreferencesKey("satellite_imagery")
+        val appTheme = stringPreferencesKey("app_theme")
+        val customAccent = longPreferencesKey("custom_accent")
+        val customBackground = stringPreferencesKey("custom_background")
+        val customDim = intPreferencesKey("custom_dim")
+        val customPhotoVersion = longPreferencesKey("custom_photo_version")
+        val airQuality = booleanPreferencesKey("air_quality")
+        val uv = booleanPreferencesKey("uv")
+        val allergy = booleanPreferencesKey("allergy")
+        val allergies = stringSetPreferencesKey("allergies") // "BIRCH:SEVERE"
+        val traffic = booleanPreferencesKey("traffic")
+        val trafficRadius = doublePreferencesKey("traffic_radius_km")
+        val trafficFlow = booleanPreferencesKey("traffic_flow")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -149,6 +184,22 @@ class SettingsRepository(context: Context) {
                 foliageEnabled = p[Keys.foliage] ?: d.foliageEnabled,
                 satelliteLayer = p[Keys.satelliteLayer] ?: d.satelliteLayer,
                 satelliteImagery = p[Keys.satelliteImagery].toEnum(d.satelliteImagery),
+                appTheme = p[Keys.appTheme].toEnum(d.appTheme),
+                customAccent = p[Keys.customAccent] ?: d.customAccent,
+                customBackground = p[Keys.customBackground].toEnum(d.customBackground),
+                customDimPercent = p[Keys.customDim] ?: d.customDimPercent,
+                customPhotoVersion = p[Keys.customPhotoVersion] ?: d.customPhotoVersion,
+                airQualityEnabled = p[Keys.airQuality] ?: d.airQualityEnabled,
+                uvEnabled = p[Keys.uv] ?: d.uvEnabled,
+                allergyEnabled = p[Keys.allergy] ?: d.allergyEnabled,
+                allergies = p[Keys.allergies]?.mapNotNull { entry ->
+                    val (a, sens) = entry.split(':').takeIf { it.size == 2 } ?: return@mapNotNull null
+                    val allergen = Allergen.entries.firstOrNull { it.name == a } ?: return@mapNotNull null
+                    allergen to (Sensitivity.entries.firstOrNull { it.name == sens } ?: Sensitivity.MODERATE)
+                }?.toMap() ?: d.allergies,
+                trafficEnabled = p[Keys.traffic] ?: d.trafficEnabled,
+                trafficRadiusKm = p[Keys.trafficRadius] ?: d.trafficRadiusKm,
+                trafficFlowLayer = p[Keys.trafficFlow] ?: d.trafficFlowLayer,
             )
         }
 
@@ -189,4 +240,20 @@ class SettingsRepository(context: Context) {
     suspend fun setFoliage(enabled: Boolean) = store.edit { it[Keys.foliage] = enabled }
     suspend fun setSatelliteLayer(enabled: Boolean) = store.edit { it[Keys.satelliteLayer] = enabled }
     suspend fun setSatelliteImagery(imagery: SatelliteImagery) = store.edit { it[Keys.satelliteImagery] = imagery.name }
+    suspend fun setAppTheme(theme: AppTheme) = store.edit { it[Keys.appTheme] = theme.name }
+    suspend fun setCustomAccent(argb: Long) = store.edit { it[Keys.customAccent] = argb }
+    suspend fun setCustomBackground(background: CustomBackground) = store.edit { it[Keys.customBackground] = background.name }
+    suspend fun setCustomDim(percent: Int) = store.edit { it[Keys.customDim] = percent.coerceIn(0, 80) }
+    suspend fun bumpCustomPhoto() = store.edit { it[Keys.customPhotoVersion] = System.currentTimeMillis() }
+    suspend fun setAirQuality(enabled: Boolean) = store.edit { it[Keys.airQuality] = enabled }
+    suspend fun setUv(enabled: Boolean) = store.edit { it[Keys.uv] = enabled }
+    suspend fun setAllergy(enabled: Boolean) = store.edit { it[Keys.allergy] = enabled }
+    /** Adds, changes ([sensitivity] non-null) or removes ([sensitivity] null) one allergen. */
+    suspend fun setAllergen(allergen: Allergen, sensitivity: Sensitivity?) = store.edit { p ->
+        val current = (p[Keys.allergies] ?: emptySet()).filterNot { it.substringBefore(':') == allergen.name }.toSet()
+        p[Keys.allergies] = if (sensitivity == null) current else current + "${allergen.name}:${sensitivity.name}"
+    }
+    suspend fun setTraffic(enabled: Boolean) = store.edit { it[Keys.traffic] = enabled }
+    suspend fun setTrafficRadius(km: Double) = store.edit { it[Keys.trafficRadius] = km.coerceIn(5.0, 160.0) }
+    suspend fun setTrafficFlow(enabled: Boolean) = store.edit { it[Keys.trafficFlow] = enabled }
 }

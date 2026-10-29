@@ -3,6 +3,12 @@ package app.northvane.weather
 import android.app.Application
 import app.northvane.core.net.HttpClients
 import app.northvane.core.history.AcisClient
+import app.northvane.core.air.AirNowClient
+import app.northvane.core.air.EpaUvClient
+import app.northvane.core.air.OpenMeteoAirClient
+import app.northvane.core.traffic.TrafficClient
+import app.northvane.core.traffic.TrafficService
+import app.northvane.weather.data.ThemeBackgroundStore
 import app.northvane.core.nws.NwsClient
 import app.northvane.core.pollen.PollenClient
 import app.northvane.core.owm.OwmClient
@@ -53,13 +59,19 @@ class AppContainer(private val app: Application) {
     val weewx: WeeWxClient by lazy { WeeWxClient(HttpClients.localServerClients(http)) }
     val radar: RadarService by lazy { RadarService(http) }
     val pollen: PollenClient by lazy { PollenClient(http) }
+    val airNow: AirNowClient by lazy { AirNowClient(http) }
+    val trafficClient: TrafficClient by lazy { TrafficClient(http) }
+    val traffic: TrafficService by lazy { TrafficService(trafficClient) }
+    val themeBackground = ThemeBackgroundStore(app)
 
     val repository: WeatherRepository by lazy {
-        WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = AcisClient(http), pollen = pollen)
+        WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = AcisClient(http), pollen = pollen,
+            airNow = airNow, epaUv = EpaUvClient(http), openMeteoAir = OpenMeteoAirClient(http),
+        )
     }
 
     val weather: WeatherService by lazy {
-        WeatherService(app, repository, weatherCache, settings, secrets, locations, connectivity)
+        WeatherService(app, repository, weatherCache, settings, secrets, locations, connectivity, placeSearch)
     }
 
     val placeSearch: PlaceSearch by lazy { PlaceSearch(app, owm, secrets, settings) }

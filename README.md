@@ -37,6 +37,14 @@ built into the app, and there are no accounts, ads or analytics.
 <img src="docs/screenshots/locations_nicknames.png" width="200" alt="Location nicknames and notifications">
 </p>
 <p>
+<img src="docs/screenshots/themes.png" width="600" alt="Six themes, light and dark">
+</p>
+<p>
+<img src="docs/screenshots/air_uv_allergy.png" width="250" alt="Air quality, UV and allergy score">
+<img src="docs/screenshots/traffic_list.png" width="250" alt="Traffic events near Portland, ME">
+<img src="docs/screenshots/themes_screen.png" width="250" alt="Theme picker">
+</p>
+<p>
 <img src="docs/screenshots/alerts_dark.png" width="200" alt="NWS alerts">
 <img src="docs/screenshots/today_satellite_metric.png" width="200" alt="Satellite mode, metric">
 </p>
@@ -96,6 +104,30 @@ mud and active warnings. Tips include sleeping-bag ratings for the overnight
 low, rainfly and guyline advice, microspikes or snowshoes, early starts before
 afternoon storms, and New England seasonal notes (black flies, ticks, hunting
 season blaze orange, short days).
+
+### Allergy score (optional)
+Tell the app what you're allergic to, for example birch (severe), grass (mild)
+and outdoor mold, and it gives each day a personal 0–100 score:
+- **Pollen** for the exact plant from the Google Pollen API forecast when it's
+  reported for your area, otherwise its pollen type (tree, grass, weed) at a
+  discount (marked as estimated). Pollen needs your Google key.
+- **Outdoor mold** (no free source measures it) is estimated from season,
+  humidity, recent rain, warmth and wet leaf litter, and drops under snow or
+  frozen ground.
+- **Air pollution** from the AQI forecast.
+- Weather adjusts it: steady rain washes pollen out, dry gusty wind spreads it,
+  and thunderstorms during high grass/tree pollen bring an asthma warning.
+Tips scale with the score: take medicine early, keep windows closed, shower
+after being outside, wear a mask for yard work.
+
+### Air quality and UV index (optional)
+- **AQI** from **EPA AirNow** (government monitors and state/local forecasts)
+  if you add the free key from docs.airnowapi.org; otherwise from Open-Meteo's
+  air quality model (CAMS), which needs no key. Shows the pollutant, a 4-day
+  outlook, Air Quality Action Days and the forecaster's discussion.
+- **UV index** from **EPA's** hourly UV forecast by ZIP code (keyless; the ZIP
+  is looked up on the device), with today's peak, an hourly bar chart and
+  protection advice. Open-Meteo fills in outside the US.
 
 ### Trail mud (optional)
 A daily mud level (dry, damp, muddy, very muddy, frozen, snow-covered) from a
@@ -165,6 +197,28 @@ This is not a utility forecast. Turn it on or off in Settings › Forecast extra
 - A pin marks the selected location.
 - Keyless OpenStreetMap basemap (OpenFreeMap) via MapLibre, with light and
   dark styles.
+
+### Traffic (optional tab)
+- **Work zones** from state DOT feeds in the USDOT **Work Zone Data Exchange
+  (WZDx)** standard. The app finds keyless feeds for your state in USDOT's
+  public feed registry; New Hampshire, Vermont and Maine publish one together.
+- **Crashes, closures and incidents** from **New England 511** (NHDOT,
+  MaineDOT, VTrans) with a free developer key.
+- **Live speeds** (optional): no government source publishes road speeds, so
+  the speed layer uses TomTom traffic tiles with your own key. TomTom's free
+  tier is 50,000 tiles a day, and one look at the map uses roughly 20–60, so
+  it's free in practice (details in Settings › Data sources).
+- Map with events and your location, plus a list sorted by distance (active
+  now, then starting this week). Radius 10, 25 or 50 miles.
+
+### Themes
+Seven static themes (Northvane, Harbor, Evergreen, Maple, Lupine, Aurora,
+Driftwood), each with its own colors, background and hero card. There are also
+two **weather themes**: **Live sky** follows the current conditions (sunny
+blue, storm violet, rainy slate, snowy white, night navy) and **Temperature**
+shifts from icy blue to summer amber. **Custom** lets you pick an accent color
+and a gradient, or your own photo with adjustable dimming. The photo is
+re-encoded into app storage with its location metadata removed.
 
 ### Satellite connectivity (T-Satellite and similar)
 - The manifest declares
@@ -248,7 +302,9 @@ docs/   Security and privacy notes.
   satellite imagery and type.
 - **Locations**: rename a place (nickname), choose whether it sends alert
   notifications, remove it.
-- **Settings › Appearance**: System / Light / Dark, wallpaper colors, units.
+- **Settings › Appearance**: theme (static, weather or custom), System / Light / Dark, wallpaper colors, units.
+- **Settings › Forecast extras › My allergies**: your allergens and sensitivity.
+- **Settings › Traffic**: tab on/off, radius, live speed layer.
 
 ## Data sources and attribution
 
@@ -256,6 +312,9 @@ docs/   Security and privacy notes.
 - HRRR future-cast tiles and the alternative NEXRAD composite: Iowa
   Environmental Mesonet, Iowa State University.
 - Recent observed weather: NOAA Regional Climate Centers, ACIS (public domain).
+- UV index and AirNow air quality: US EPA. Air quality model: Open-Meteo (CC BY 4.0, CAMS).
+- Work zones: state DOT WZDx feeds via the USDOT ITS DataHub registry. Incidents: New England 511.
+- Optional traffic speeds: TomTom (your own key).
 - Satellite imagery: NOAA nowCOAST (GOES-East/West).
 - Basemap: OpenFreeMap; © OpenMapTiles; © OpenStreetMap contributors.
 - Optional: Google Pollen API, OpenWeatherMap (your own accounts and keys).

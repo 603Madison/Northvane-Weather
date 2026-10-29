@@ -76,6 +76,36 @@ class PlaceSearch(
         }.distinctBy { it.name }
     }
 
+    /** US ZIP code for a point, from the device's geocoder (used for EPA's UV forecast). */
+    suspend fun postalCode(latitude: Double, longitude: Double): String? {
+        if (!Geocoder.isPresent()) return null
+        val geocoder = Geocoder(context, Locale.US)
+        val addresses: List<Address> = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                withTimeoutOrNull(10_000) {
+                    suspendCancellableCoroutine { cont ->
+                        geocoder.getFromLocation(latitude, longitude, 1, object : Geocoder.GeocodeListener {
+                            override fun onGeocode(addresses: MutableList<Address>) {
+                                if (cont.isActive) cont.resume(addresses.toList())
+                            }
+
+                            override fun onError(errorMessage: String?) {
+                                if (cont.isActive) cont.resume(emptyList())
+                            }
+                        })
+                    }
+                }.orEmpty()
+            } else {
+                withContext(Dispatchers.IO) {
+                    @Suppress("DEPRECATION")
+                    geocoder.getFromLocation(latitude, longitude, 1).orEmpty()
+                }
+            }
+        }.getOrDefault(emptyList())
+        val address = addresses.firstOrNull { it.countryCode == "US" } ?: return null
+        return address.postalCode?.take(5)?.takeIf { it.matches(Regex("^\\d{5}$")) }
+    }
+
     companion object {
         private val COORDINATES = Regex("""^\s*(-?\d{1,2}(?:\.\d+)?)\s*[, ]\s*(-?\d{1,3}(?:\.\d+)?)\s*$""")
 

@@ -22,6 +22,28 @@ import app.northvane.core.nws.NwsClient
 import app.northvane.core.nws.NwsGridData
 import app.northvane.core.nws.NwsParsers
 import app.northvane.core.history.AcisClient
+import app.northvane.core.air.EpaUvClient
+import app.northvane.core.air.OpenMeteoAirClient
+import app.northvane.core.model.Allergen
+import app.northvane.core.model.Sensitivity
+import app.northvane.core.model.UvForecast
+import app.northvane.core.model.WeatherCondition
+import app.northvane.core.traffic.LaneImpact
+import app.northvane.core.traffic.TrafficClient
+import app.northvane.core.traffic.TrafficEventType
+import app.northvane.core.traffic.TrafficSnapshot
+import app.northvane.weather.ui.settings.AllergiesScreen
+import app.northvane.weather.ui.settings.ThemesScreen
+import app.northvane.weather.ui.theme.AppTheme
+import app.northvane.weather.ui.theme.ThemeWeather
+import app.northvane.weather.ui.traffic.TrafficEventList
+import app.northvane.weather.ui.traffic.TrafficUiState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.model.PollenForecast
 import app.northvane.core.model.WeatherHistory
@@ -91,7 +113,17 @@ class ScreenshotTest {
             sunset = sunset,
             history = WeatherHistory(AcisClient.parseGrid(resource("me_acis.json")).first, elevationM = 20.0, fetchedAt = now),
             pollen = pollen(now.atZone(zone).toLocalDate()),
+            airQuality = OpenMeteoAirClient.parse(resource("aq.json"), now).first,
+            uv = uvToday(now, zone),
         ).let { Outlooks.annotate(it, location.latitude, location.longitude, now) }
+    }
+
+    /** Captured EPA hourly UV forecast, moved to today. */
+    private fun uvToday(now: Instant, zone: java.time.ZoneId): UvForecast {
+        val hours = EpaUvClient.parseHourly(resource("uv.json"), zone)
+        val shift = java.time.Duration.between(hours.first().time.atZone(zone).toLocalDate().atStartOfDay(zone), now.atZone(zone).toLocalDate().atStartOfDay(zone))
+        val moved = hours.map { it.copy(time = it.time.plus(shift)) }
+        return UvForecast(moved, moved.maxOf { it.index }, source = "EPA UV Index", fetchedAt = now)
     }
 
     /** Captured Google Pollen API response, moved to today's dates. */
@@ -113,7 +145,11 @@ class ScreenshotTest {
 
     private fun state(
         snapshot: WeatherSnapshot? = snapshot(),
-        settings: AppSettings = AppSettings(units = UnitSystem.IMPERIAL, pollenEnabled = true),
+        settings: AppSettings = AppSettings(
+            units = UnitSystem.IMPERIAL,
+            pollenEnabled = true,
+            allergies = mapOf(Allergen.BIRCH to Sensitivity.SEVERE, Allergen.GRASS to Sensitivity.MILD, Allergen.MOLD to Sensitivity.MODERATE),
+        ),
         network: NetworkStatus = NetworkStatus(),
         liteMode: Boolean = false,
     ) = MainUiState(
@@ -130,7 +166,14 @@ class ScreenshotTest {
     private val noActions = HomeActions({}, {}, {}, {}, {}, {})
 
     private fun render(dark: Boolean, content: @Composable () -> Unit) {
-        compose.setContent { NorthvaneTheme(darkTheme = dark, dynamicColor = false, content = content) }
+        compose.setContent {
+            NorthvaneTheme(darkTheme = dark, dynamicColor = false) {
+                Box {
+                    Backdrop()
+                    content()
+                }
+            }
+        }
         compose.waitForIdle()
     }
 
@@ -183,6 +226,70 @@ class ScreenshotTest {
         )
         render(dark = false) { HomeScreen(state(base.copy(alerts = listOf(watch))), noActions, {}, {}, {}) }
         save("today_watch_light")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1600dp-xxhdpi")
+    fun themesGallery() {
+        val container = AppContainer(ApplicationProvider.getApplicationContext())
+        var current by androidx.compose.runtime.mutableStateOf(AppTheme.HARBOR to false)
+        var showPicker by androidx.compose.runtime.mutableStateOf(false)
+        val st = state()
+        compose.setContent {
+            val (theme, dark) = current
+            NorthvaneTheme(darkTheme = dark, dynamicColor = false, theme = theme, weather = ThemeWeather(WeatherCondition.CLEAR, true, 12.0)) {
+                Box {
+                    Backdrop()
+                    if (showPicker) ThemesScreen(st.copy(settings = st.settings.copy(appTheme = theme)), container, onBack = {}) else HomeScreen(st, noActions, {}, {}, {})
+                }
+            }
+        }
+        for (theme in listOf(AppTheme.HARBOR, AppTheme.MAPLE, AppTheme.LUPINE, AppTheme.AURORA, AppTheme.LIVE_SKY, AppTheme.TEMPERATURE)) {
+            for (dark in listOf(false, true)) {
+                current = theme to dark
+                save("theme_${theme.name.lowercase()}_${if (dark) "dark" else "light"}")
+            }
+        }
+        current = AppTheme.EVERGREEN to false
+        showPicker = true
+        save("themes_screen")
+    }
+
+    @Composable
+    private fun Backdrop() {
+        val b = app.northvane.weather.ui.theme.LocalBackdrop.current
+        Box(Modifier.fillMaxSize().background(b.brush))
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h2600dp-xxhdpi")
+    fun allergiesEditor() {
+        val container = AppContainer(ApplicationProvider.getApplicationContext())
+        render(dark = false) { AllergiesScreen(state(), container, onBack = {}) }
+        save("allergies_editor")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1800dp-xxhdpi")
+    fun trafficList() {
+        val events = TrafficClient.parseWzdx(resource("wzdx.json"), location.point, 40.0, Instant.parse("2026-10-29T18:00:00Z"), "NHDOT/VTAOT/MEDOT")
+        val crash = events.first().copy(
+            id = "crash", type = TrafficEventType.CRASH, road = "I-295", direction = "northbound",
+            description = "Crash blocking the right lane near Exit 7.", impact = LaneImpact.SOME_CLOSED,
+            start = Instant.now().minusSeconds(1200), end = null, distanceKm = 1.4, source = "New England 511",
+        )
+        val snapshot = TrafficSnapshot(
+            listOf(crash) + events.map { it.copy(end = it.end?.let { e -> maxOf(e, Instant.now().plusSeconds(86400)) }) },
+            listOf("NHDOT/VTAOT/MEDOT (WZDx)", "New England 511"), Instant.now(),
+        )
+        val zone = java.time.ZoneId.of("America/New_York")
+        render(dark = false) {
+            TrafficEventList(
+                TrafficUiState(snapshot = snapshot, hasNe511Key = true), UnitSystem.IMPERIAL, "ME",
+                app.northvane.weather.ui.TimeFormat(zone, false), onFocus = {},
+            )
+        }
+        save("traffic_list")
     }
 
     @Test

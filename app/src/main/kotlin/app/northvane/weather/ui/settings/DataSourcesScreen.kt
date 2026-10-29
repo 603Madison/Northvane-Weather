@@ -2,6 +2,7 @@
 
 package app.northvane.weather.ui.settings
 
+import androidx.compose.ui.graphics.Color
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +34,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -57,6 +59,8 @@ import app.northvane.core.model.UnitSystem
 import app.northvane.core.model.Units
 import app.northvane.core.outlook.OutlookText
 import app.northvane.core.pollen.PollenClient
+import app.northvane.core.air.AirNowClient
+import app.northvane.core.traffic.TrafficClient
 import app.northvane.core.pollen.PollenPricing
 import app.northvane.weather.data.AppSignature
 import android.Manifest
@@ -119,12 +123,14 @@ fun DataSourcesScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 title = { Text("Data sources") },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                 },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
             )
         },
     ) { padding ->
@@ -196,6 +202,51 @@ fun DataSourcesScreen(
                     }
                 },
                 onKeyChanged = onSourcesChanged,
+            )
+
+            ApiKeySection(
+                title = "Air quality: EPA AirNow (optional)",
+                description = "Official AQI from EPA monitoring stations and state/local forecasts. Free: register at " +
+                    "docs.airnowapi.org and paste the key here. Without a key, Northvane uses Open-Meteo's air quality " +
+                    "model (free, no key, less precise near the ground).",
+                costLines = listOf(
+                    "Free government API (EPA). Limit: 500 requests per hour; Northvane uses at most 2 per place every 30 minutes.",
+                    "AirNow only accepts the key inside the request URL, so those requests are never cached.",
+                ),
+                secretName = SecretStore.AIRNOW_API_KEY,
+                validate = { if (AirNowClient.looksLikeApiKey(it)) null else "AirNow keys look like 8-4-4-4-12 hex characters." },
+                container = container,
+                onChanged = onSourcesChanged,
+            )
+
+            ApiKeySection(
+                title = "Traffic: New England 511 (optional)",
+                description = "Crashes, closures and incidents from NHDOT, MaineDOT and VTrans. Free: create an account at " +
+                    "newengland511.org and request a developer key. Work zones on the Traffic tab come from the states' " +
+                    "public WZDx feeds and need no key.",
+                costLines = listOf(
+                    "Free government API. It allows about 10 requests a minute; Northvane asks at most every 5 minutes while the Traffic tab is open.",
+                ),
+                secretName = SecretStore.NE511_API_KEY,
+                validate = { if (TrafficClient.looks511Key(it)) null else "That doesn't look like a 511 developer key." },
+                container = container,
+                onChanged = {},
+            )
+
+            ApiKeySection(
+                title = "Traffic speeds: TomTom (optional)",
+                description = "No government source publishes live road speeds, so the speed layer on the Traffic map uses " +
+                    "TomTom's traffic tiles with your own key from developer.tomtom.com (no card needed for the free tier).",
+                costLines = listOf(
+                    "Free: 50,000 map tiles per day. One look at the traffic map uses roughly 20–60 tiles, so normal use stays free.",
+                    "Beyond the free allowance TomTom bills per 1,000 tiles (a few cents). Without a card on file, requests simply stop at the limit.",
+                    "TomTom announced new pricing from July 2026; check developer.tomtom.com/pricing for current rates.",
+                    "The key is part of each tile URL (TomTom requires it). Tiles are cached only inside the app.",
+                ),
+                secretName = SecretStore.TOMTOM_API_KEY,
+                validate = { if (TrafficClient.looksTomTomKey(it)) null else "TomTom keys are 32 letters and digits." },
+                container = container,
+                onChanged = {},
             )
 
             OwmSection(
@@ -798,6 +849,77 @@ private fun PollenSection(
             }
         }
         testResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+    }
+}
+
+/** A write-only API key field with an explanation of what the service costs. */
+@Composable
+private fun ApiKeySection(
+    title: String,
+    description: String,
+    costLines: List<String>,
+    secretName: String,
+    validate: (String) -> String?,
+    container: AppContainer,
+    onChanged: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    var hasKey by remember { mutableStateOf(false) }
+    var newKey by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(secretName) { hasKey = withContext(Dispatchers.IO) { container.secrets.has(secretName) } }
+    SectionCard(title) {
+        Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("Cost", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                costLines.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer) }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+            Text(if (hasKey) "Key saved (encrypted on this device)" else "No key saved", style = MaterialTheme.typography.bodyMedium)
+        }
+        OutlinedTextField(
+            value = newKey,
+            onValueChange = {
+                newKey = it.trim().take(80)
+                error = null
+            },
+            singleLine = true,
+            label = { Text(if (hasKey) "Replace key" else "API key") },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+            isError = error != null,
+            supportingText = error?.let { { Text(it) } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilledTonalButton(enabled = newKey.isNotEmpty(), onClick = {
+                val problem = validate(newKey)
+                if (problem != null) {
+                    error = problem
+                } else {
+                    val key = newKey
+                    scope.launch {
+                        withContext(Dispatchers.IO) { container.secrets.put(secretName, key) }
+                        newKey = ""
+                        hasKey = true
+                        onChanged()
+                    }
+                }
+            }) { Text("Save key") }
+            if (hasKey) {
+                OutlinedButton(onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { container.secrets.remove(secretName) }
+                        hasKey = false
+                        onChanged()
+                    }
+                }) { Text("Remove key") }
+            }
+        }
     }
 }
 

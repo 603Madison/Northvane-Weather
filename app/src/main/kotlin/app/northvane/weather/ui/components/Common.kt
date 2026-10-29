@@ -78,6 +78,27 @@ object NorthvaneIcons {
         )
     }
 
+    /** A car seen from the front, for the Traffic tab. */
+    val Traffic: ImageVector by lazy {
+        icon(
+            "traffic",
+            "M5,11 L6.6,6.4 A2,2 0 0,1 8.5,5 h7 a2,2 0 0,1 1.9,1.4 L19,11 " +
+                "M4,11 h16 a1,1 0 0,1 1,1 v4 a1,1 0 0,1 -1,1 H4 a1,1 0 0,1 -1,-1 v-4 a1,1 0 0,1 1,-1 z " +
+                "M5.5,17 v2 M18.5,17 v2 M7,14 h1 M16,14 h1",
+            stroked = true,
+        )
+    }
+
+    /** A flower, for allergies. */
+    val Pollen: ImageVector by lazy {
+        icon(
+            "pollen",
+            "M12,9.5 a2.5,2.5 0 1,0 0.01,0 M12,9.5 a3,3 0 1,1 0,-5 a3,3 0 1,1 0,5 " +
+                "M14.4,11.2 a3,3 0 1,1 3.6,-3.4 M9.6,11.2 a3,3 0 1,0 -3.6,-3.4 M12,14.5 v6 M12,18 c-2,-1 -3.5,-1 -4.5,0",
+            stroked = true,
+        )
+    }
+
     val Pause: ImageVector by lazy { icon("pause", "M6,19h4V5H6v14zM14,5v14h4V5h-4z", stroked = false) }
 
     val Satellite: ImageVector by lazy {
