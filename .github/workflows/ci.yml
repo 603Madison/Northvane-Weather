@@ -38,7 +38,7 @@ jobs:
       - name: Unit tests, screenshot tests, lint, debug build
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: reports-and-screenshots
@@ -49,7 +49,7 @@ jobs:
             app/build/reports/tests/
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: northvane-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
