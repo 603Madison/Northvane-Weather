@@ -21,7 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -48,6 +47,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.northvane.core.model.Activity
 import app.northvane.core.model.DailyForecast
 import app.northvane.core.model.DetailSource
 import app.northvane.core.model.HourlyForecast
@@ -71,55 +71,53 @@ import kotlin.math.sin
 
 private val RainBlue = Color(0xFF3B8EEA)
 
-private enum class HourlyMetric(val label: String) { PRECIP("Precip"), WIND("Wind"), HUMIDITY("Humidity"), FEELS("Feels like"), CLOUDS("Clouds") }
+/** One row of the consolidated hourly card. */
+private enum class HourRow(val label: String, val height: Int) {
+    TIME("", 20), ICON("", 36), TEMP("", 28), FEELS("Feels", 20), PRECIP("Precip", 30), AMOUNT("Amount", 20),
+    WIND("Wind", 20), GUST("Gusts", 20), HUMIDITY("Humidity", 20), DEWPOINT("Dew pt", 20), CLOUDS("Clouds", 20),
+}
 
+/**
+ * Everything for the next 36 hours in one tall card: a column per hour, with
+ * labelled rows (feels like, precipitation chance and amount, wind and gusts,
+ * humidity, dew point, cloud cover). Rows without data are left out.
+ */
 @Composable
 internal fun HourlySection(hours: List<HourlyForecast>, f: UnitFormatter, time: TimeFormat) {
-    var metric by rememberSaveable { mutableStateOf(HourlyMetric.PRECIP) }
     val shown = hours.take(36)
-    val available = HourlyMetric.entries.filter { m ->
-        when (m) {
-            HourlyMetric.PRECIP -> true
-            HourlyMetric.WIND -> shown.any { it.windSpeedKph != null }
-            HourlyMetric.HUMIDITY -> shown.any { it.humidityPercent != null }
-            HourlyMetric.FEELS -> shown.any { it.apparentTemperatureC != null }
-            HourlyMetric.CLOUDS -> shown.any { it.skyCoverPercent != null }
+    val rows = HourRow.entries.filter { r ->
+        when (r) {
+            HourRow.TIME, HourRow.ICON, HourRow.TEMP, HourRow.PRECIP -> true
+            HourRow.FEELS -> shown.any { h -> h.apparentTemperatureC != null && h.temperatureC != null }
+            HourRow.AMOUNT -> shown.any { (it.precipitationMm ?: 0.0) >= 0.05 || (it.snowMm ?: 0.0) >= 1.0 }
+            HourRow.WIND -> shown.any { it.windSpeedKph != null }
+            HourRow.GUST -> shown.any { it.windGustKph != null }
+            HourRow.HUMIDITY -> shown.any { it.humidityPercent != null }
+            HourRow.DEWPOINT -> shown.any { it.dewpointC != null }
+            HourRow.CLOUDS -> shown.any { it.skyCoverPercent != null }
         }
     }
+    val secondary = MaterialTheme.colorScheme.onSurfaceVariant
     Column {
         SectionTitle("Hourly")
         Card(
             shape = RoundedCornerShape(20.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
         ) {
-            Row(
-                Modifier
-                    .horizontalScroll(rememberScrollState())
-                    .padding(start = 12.dp, end = 12.dp, top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                available.forEach { m ->
-                    FilterChip(selected = metric == m, onClick = { metric = m }, label = { Text(m.label) })
+            Row(Modifier.padding(vertical = 10.dp)) {
+                // Row labels, fixed on the left while the hours scroll.
+                Column(Modifier.padding(start = 14.dp, end = 4.dp).width(70.dp)) {
+                    rows.forEach { r ->
+                        Box(Modifier.height(r.height.dp), contentAlignment = Alignment.CenterStart) {
+                            val label = if (r == HourRow.WIND || r == HourRow.GUST) "${r.label} ${f.windUnit}" else r.label
+                            if (label.isNotEmpty()) Text(label, style = MaterialTheme.typography.labelSmall, color = secondary, maxLines = 1)
+                        }
+                    }
                 }
-            }
-            LazyRow(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-                items(shown, key = { it.time.toEpochMilli() }) { hour ->
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier
-                            .width(64.dp)
-                            .padding(vertical = 4.dp),
-                    ) {
+                LazyRow(contentPadding = PaddingValues(end = 8.dp)) {
+                    items(shown, key = { it.time.toEpochMilli() }) { hour ->
                         val isNow = hour == shown.first() && hour.time.isBefore(Instant.now())
-                        Text(
-                            if (isNow) "Now" else time.hour(hour.time),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        WeatherIcon(hour.condition, hour.isDaytime, size = 32.dp)
-                        Text(f.temperature(hour.temperatureC), style = MaterialTheme.typography.titleMedium)
-                        HourMetric(hour, metric, f)
+                        HourColumn(hour, rows, if (isNow) "Now" else time.hour(hour.time), f)
                     }
                 }
             }
@@ -128,38 +126,63 @@ internal fun HourlySection(hours: List<HourlyForecast>, f: UnitFormatter, time: 
 }
 
 @Composable
-private fun HourMetric(hour: HourlyForecast, metric: HourlyMetric, f: UnitFormatter) {
+private fun HourColumn(hour: HourlyForecast, rows: List<HourRow>, label: String, f: UnitFormatter) {
     val secondary = MaterialTheme.colorScheme.onSurfaceVariant
-    val small = MaterialTheme.typography.labelSmall
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.height(36.dp)) {
-        when (metric) {
-            HourlyMetric.PRECIP -> {
-                val pop = hour.precipitationChance ?: 0
-                Text("$pop%", style = MaterialTheme.typography.labelMedium, color = if (pop >= 10) RainBlue else secondary)
-                val amount = when {
-                    (hour.snowMm ?: 0.0) >= 1.0 -> f.snow(hour.snowMm)
-                    (hour.iceMm ?: 0.0) >= 0.25 -> "ice"
-                    else -> f.precipitationShort(hour.precipitationMm)
+    val cell = MaterialTheme.typography.labelMedium
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(54.dp)) {
+        rows.forEach { r ->
+            Box(Modifier.height(r.height.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                when (r) {
+                    HourRow.TIME -> Text(label, style = cell, color = secondary)
+                    HourRow.ICON -> WeatherIcon(hour.condition, hour.isDaytime, size = 30.dp)
+                    HourRow.TEMP -> Text(f.temperature(hour.temperatureC), style = MaterialTheme.typography.titleMedium)
+                    HourRow.FEELS -> {
+                        val feels = hour.apparentTemperatureC
+                        val differs = feels != null && hour.temperatureC != null && abs(feels - hour.temperatureC!!) >= 1.5
+                        Text(f.temperature(feels), style = cell, color = if (differs) MaterialTheme.colorScheme.onSurface else secondary)
+                    }
+                    HourRow.PRECIP -> PrecipCell(hour.precipitationChance ?: 0)
+                    HourRow.AMOUNT -> {
+                        val amount = when {
+                            (hour.snowMm ?: 0.0) >= 1.0 -> f.snow(hour.snowMm)
+                            (hour.iceMm ?: 0.0) >= 0.25 -> "ice"
+                            else -> f.precipitationShort(hour.precipitationMm)
+                        }
+                        Text(amount, style = MaterialTheme.typography.labelSmall, color = RainBlue, maxLines = 1)
+                    }
+                    HourRow.WIND -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        hour.windDirectionDeg?.let { WindArrow(it, Modifier.size(11.dp)) }
+                        Spacer(Modifier.width(2.dp))
+                        Text(f.windNumber(hour.windSpeedKph), style = cell)
+                    }
+                    HourRow.GUST -> {
+                        val gust = hour.windGustKph
+                        val notable = gust != null && gust - (hour.windSpeedKph ?: 0.0) >= 8
+                        Text(f.windNumber(gust), style = cell, color = if (notable) MaterialTheme.colorScheme.onSurface else secondary)
+                    }
+                    HourRow.HUMIDITY -> Text(f.percent(hour.humidityPercent), style = cell)
+                    HourRow.DEWPOINT -> Text(f.temperature(hour.dewpointC), style = cell, color = secondary)
+                    HourRow.CLOUDS -> Text(hour.skyCoverPercent?.let { "$it%" } ?: "--", style = cell, color = secondary)
                 }
-                if (amount.isNotEmpty()) Text(amount, style = small, color = RainBlue)
             }
-            HourlyMetric.WIND -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    hour.windDirectionDeg?.let { WindArrow(it, Modifier.size(12.dp)) }
-                    Spacer(Modifier.width(2.dp))
-                    Text(f.windNumber(hour.windSpeedKph), style = MaterialTheme.typography.labelMedium)
-                }
-                val gust = hour.windGustKph
-                if (gust != null && gust - (hour.windSpeedKph ?: 0.0) >= 8) {
-                    Text("g${f.windNumber(gust)}", style = small, color = secondary)
-                }
-            }
-            HourlyMetric.HUMIDITY -> {
-                Text(f.percent(hour.humidityPercent), style = MaterialTheme.typography.labelMedium)
-                hour.dewpointC?.let { Text("dp ${f.temperature(it)}", style = small, color = secondary) }
-            }
-            HourlyMetric.FEELS -> Text(f.temperature(hour.apparentTemperatureC), style = MaterialTheme.typography.labelMedium)
-            HourlyMetric.CLOUDS -> Text(hour.skyCoverPercent?.let { "$it%" } ?: "--", style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+/** Chance of precipitation as a number over a small bar that fills with the chance. */
+@Composable
+private fun PrecipCell(chance: Int) {
+    val track = MaterialTheme.colorScheme.surfaceVariant
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            "$chance%",
+            style = MaterialTheme.typography.labelMedium,
+            color = if (chance >= 10) RainBlue else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Canvas(Modifier.padding(top = 2.dp).width(30.dp).height(4.dp)) {
+            val r = CornerRadius(size.height / 2, size.height / 2)
+            drawRoundRect(track, cornerRadius = r)
+            if (chance > 0) drawRoundRect(RainBlue, size = Size(size.width * chance / 100f, size.height), cornerRadius = r)
         }
     }
 }
@@ -183,7 +206,14 @@ private fun WindArrow(fromDegrees: Double, modifier: Modifier = Modifier) {
 }
 
 @Composable
-internal fun DailySection(days: List<DailyForecast>, f: UnitFormatter, time: TimeFormat, showOutage: Boolean) {
+internal fun DailySection(
+    days: List<DailyForecast>,
+    f: UnitFormatter,
+    time: TimeFormat,
+    showOutage: Boolean,
+    activities: Set<Activity> = emptySet(),
+    showMud: Boolean = false,
+) {
     var expanded by rememberSaveable { mutableStateOf<String?>(null) }
     val temps = days.flatMap { listOfNotNull(it.lowC, it.highC) }
     val min = temps.minOrNull() ?: 0.0
@@ -249,6 +279,23 @@ internal fun DailySection(days: List<DailyForecast>, f: UnitFormatter, time: Tim
                             outage?.let {
                                 Spacer(Modifier.height(10.dp))
                                 OutagePanel(it, f)
+                            }
+                            val mud = day.mud?.takeIf { showMud }
+                            if (mud != null) {
+                                Spacer(Modifier.height(10.dp))
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Canvas(Modifier.size(10.dp)) { drawCircle(mudColor(mud.level)) }
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(
+                                        "Trails: ${mud.level.label.lowercase()}" + if (mud.mudSeason) " (mud season)" else "",
+                                        style = MaterialTheme.typography.bodySmall,
+                                    )
+                                }
+                            }
+                            val scores = day.activities.filter { it.activity in activities }
+                            if (scores.isNotEmpty()) {
+                                Spacer(Modifier.height(10.dp))
+                                ActivityStrip(scores)
                             }
                             Spacer(Modifier.height(10.dp))
                             day.dayDetail?.let { DetailParagraph("Day", it) }
@@ -322,6 +369,9 @@ internal fun describe(factor: OutageFactor, f: UnitFormatter): String = when (fa
     OutageFactor.Kind.GUSTS -> "Gusts to ${f.windSpeed(factor.value)}"
     OutageFactor.Kind.SUSTAINED_WIND -> "Sustained wind to ${f.windSpeed(factor.value)}"
     OutageFactor.Kind.LEAVES_ON -> "Trees in leaf catch more wind"
+    OutageFactor.Kind.LEAVES_OFF -> "Bare trees catch less wind this time of year"
+    OutageFactor.Kind.FROZEN_GROUND -> "Frozen ground holds roots firm"
+    OutageFactor.Kind.SOFT_GROUND -> "Thawing, soggy ground lets trees topple"
     OutageFactor.Kind.SATURATED_GROUND -> "${f.precipitation(factor.value)} of rain softens the ground"
     OutageFactor.Kind.ICE -> "${f.precipitation(factor.value)} of ice"
     OutageFactor.Kind.WET_SNOW -> "${f.snow(factor.value)} of heavy, wet snow"

@@ -39,7 +39,7 @@ class AlertCheckWorker(appContext: Context, params: WorkerParameters) : Coroutin
         // Respect the user's satellite settings for background checks.
         if (!isAllowed(SatelliteFeature.BACKGROUND_ALERTS, settings, container.connectivity.current())) return Result.success()
 
-        val locations = container.locations.locations.first().take(MAX_LOCATIONS)
+        val locations = container.locations.locations.first().filter { it.notify }.take(MAX_LOCATIONS)
         if (locations.isEmpty()) return Result.success()
 
         val tracker = AlertTracker()
@@ -62,7 +62,7 @@ class AlertCheckWorker(appContext: Context, params: WorkerParameters) : Coroutin
             container.weatherCache.updateAlerts(location.id, alerts)
         }
         container.alertState.write(state)
-        AlertNotifier.notify(applicationContext, toNotify, locations.associate { it.id to it.name })
+        AlertNotifier.notify(applicationContext, toNotify, locations.associate { it.id to it.displayName })
         return if (failures == locations.size) Result.retry() else Result.success()
     }
 

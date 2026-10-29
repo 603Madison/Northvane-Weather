@@ -12,7 +12,9 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import app.northvane.core.model.AlertCategory
 import app.northvane.core.model.UnitSystem
+import app.northvane.core.model.Activity
 import app.northvane.core.radar.RadarSource
+import app.northvane.core.radar.SatelliteImagery
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
@@ -36,8 +38,11 @@ enum class SatelliteFeature(val title: String, val description: String, val appr
     DAILY_FORECAST("Daily forecast", "7-day NWS forecast", "~4 KB", true),
     FORECAST_DETAILS("Forecast details", "Gusts, rain/snow/ice amounts, clouds, outage risk inputs", "~10 KB", true),
     HOURLY_FORECAST("Hourly forecast", "Next 48 hours", "~6 KB", true),
+    HISTORY("Recent weather (NOAA)", "Past rain and temperatures for mud, foliage and seasonal outage estimates; at most every 6 hours", "~3 KB", true),
+    POLLEN("Pollen forecast", "Google Pollen API, only if you've added a key; at most every 6 hours", "~6 KB", false),
     RADAR("Radar", "Past hour of radar images", "0.5–3 MB per view", false),
     FUTURE_CAST("Radar future cast", "HRRR model radar for the next hours", "0.5–2 MB per view", false),
+    SATELLITE_IMAGERY("Satellite imagery", "GOES cloud imagery under the radar", "0.3–2 MB per view", false),
     OWM_FALLBACK("OpenWeatherMap fallback", "Only if enabled in Data sources", "~5 KB", false);
 
     companion object {
@@ -62,6 +67,13 @@ data class AppSettings(
     val notificationPromptShown: Boolean = false,
     val satelliteFeatures: Set<SatelliteFeature> = SatelliteFeature.DEFAULTS,
     val outageRiskEnabled: Boolean = true,
+    val pollenEnabled: Boolean = false,
+    val activitiesEnabled: Boolean = true,
+    val activities: Set<Activity> = Activity.entries.toSet(),
+    val mudEnabled: Boolean = true,
+    val foliageEnabled: Boolean = true,
+    val satelliteLayer: Boolean = false,
+    val satelliteImagery: SatelliteImagery = SatelliteImagery.AUTO,
 ) {
     companion object {
         private fun defaultUnits(): UnitSystem =
@@ -91,6 +103,13 @@ class SettingsRepository(context: Context) {
         val notificationPrompt = booleanPreferencesKey("notification_prompt_shown")
         val satelliteFeatures = stringSetPreferencesKey("satellite_features")
         val outageRisk = booleanPreferencesKey("outage_risk")
+        val pollen = booleanPreferencesKey("pollen")
+        val activitiesEnabled = booleanPreferencesKey("activities_enabled")
+        val activities = stringSetPreferencesKey("activities")
+        val mud = booleanPreferencesKey("mud")
+        val foliage = booleanPreferencesKey("foliage")
+        val satelliteLayer = booleanPreferencesKey("satellite_layer")
+        val satelliteImagery = stringPreferencesKey("satellite_imagery")
     }
 
     private inline fun <reified T : Enum<T>> String?.toEnum(default: T): T =
@@ -121,6 +140,15 @@ class SettingsRepository(context: Context) {
                     ?.mapNotNull { name -> SatelliteFeature.entries.firstOrNull { it.name == name } }
                     ?.toSet() ?: d.satelliteFeatures,
                 outageRiskEnabled = p[Keys.outageRisk] ?: d.outageRiskEnabled,
+                pollenEnabled = p[Keys.pollen] ?: d.pollenEnabled,
+                activitiesEnabled = p[Keys.activitiesEnabled] ?: d.activitiesEnabled,
+                activities = p[Keys.activities]
+                    ?.mapNotNull { name -> Activity.entries.firstOrNull { it.name == name } }
+                    ?.toSet() ?: d.activities,
+                mudEnabled = p[Keys.mud] ?: d.mudEnabled,
+                foliageEnabled = p[Keys.foliage] ?: d.foliageEnabled,
+                satelliteLayer = p[Keys.satelliteLayer] ?: d.satelliteLayer,
+                satelliteImagery = p[Keys.satelliteImagery].toEnum(d.satelliteImagery),
             )
         }
 
@@ -151,4 +179,14 @@ class SettingsRepository(context: Context) {
         p[Keys.satelliteFeatures] = if (enabled) current + feature.name else current - feature.name
     }
     suspend fun setOutageRisk(enabled: Boolean) = store.edit { it[Keys.outageRisk] = enabled }
+    suspend fun setPollen(enabled: Boolean) = store.edit { it[Keys.pollen] = enabled }
+    suspend fun setActivitiesEnabled(enabled: Boolean) = store.edit { it[Keys.activitiesEnabled] = enabled }
+    suspend fun setActivity(activity: Activity, enabled: Boolean) = store.edit { p ->
+        val current = p[Keys.activities] ?: Activity.entries.map { it.name }.toSet()
+        p[Keys.activities] = if (enabled) current + activity.name else current - activity.name
+    }
+    suspend fun setMud(enabled: Boolean) = store.edit { it[Keys.mud] = enabled }
+    suspend fun setFoliage(enabled: Boolean) = store.edit { it[Keys.foliage] = enabled }
+    suspend fun setSatelliteLayer(enabled: Boolean) = store.edit { it[Keys.satelliteLayer] = enabled }
+    suspend fun setSatelliteImagery(imagery: SatelliteImagery) = store.edit { it[Keys.satelliteImagery] = imagery.name }
 }

@@ -80,7 +80,7 @@ fun AlertsScreen(state: MainUiState, onRefresh: () -> Unit, onOpenSettings: () -
                     Column {
                         Text("Alerts")
                         state.selected?.let {
-                            Text(it.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(it.displayName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 },

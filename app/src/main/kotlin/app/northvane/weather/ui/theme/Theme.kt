@@ -10,6 +10,7 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -110,4 +111,42 @@ fun NorthvaneTheme(
         else -> LightColors
     }
     MaterialTheme(colorScheme = colors, typography = NorthvaneTypography, content = content)
+}
+
+/**
+ * Red scheme for the Today screen while an NWS warning is in effect. Only
+ * warnings trigger it; watches, advisories and statements leave the normal theme.
+ */
+@Composable
+fun WarningTheme(active: Boolean, content: @Composable () -> Unit) {
+    if (!active) {
+        content()
+        return
+    }
+    val base = MaterialTheme.colorScheme
+    val dark = base.background.luminance() < 0.5f
+    val scheme = if (dark) {
+        base.copy(
+            primary = Color(0xFFFF8A80), onPrimary = Color(0xFF5C0000),
+            primaryContainer = Color(0xFF6B1515), onPrimaryContainer = Color(0xFFFFDAD6),
+            secondaryContainer = Color(0xFF4A1515), onSecondaryContainer = Color(0xFFFFDAD6),
+            background = Color(0xFF1A0B0D), surface = Color(0xFF1A0B0D),
+            surfaceVariant = Color(0xFF3D1F22), onSurfaceVariant = Color(0xFFE0B8B5),
+            surfaceContainerLow = Color(0xFF211012), surfaceContainer = Color(0xFF2A1215),
+            surfaceContainerHigh = Color(0xFF331619), surfaceContainerHighest = Color(0xFF3D1B1F),
+            outline = Color(0xFF6B3A3A), outlineVariant = Color(0xFF4A2628),
+        )
+    } else {
+        base.copy(
+            primary = Color(0xFFC62828), onPrimary = Color.White,
+            primaryContainer = Color(0xFFFFDAD6), onPrimaryContainer = Color(0xFF410002),
+            secondaryContainer = Color(0xFFFFE3E0), onSecondaryContainer = Color(0xFF5C0F0F),
+            background = Color(0xFFFFF1F0), surface = Color(0xFFFFF1F0),
+            surfaceVariant = Color(0xFFF9DEDC), onSurfaceVariant = Color(0xFF6E4B49),
+            surfaceContainerLow = Color(0xFFFFF8F7), surfaceContainer = Color(0xFFFFFBFA),
+            surfaceContainerHigh = Color(0xFFFCE9E7), surfaceContainerHighest = Color(0xFFF8DEDB),
+            outline = Color(0xFFE3B5B1), outlineVariant = Color(0xFFF3D3D0),
+        )
+    }
+    MaterialTheme(colorScheme = scheme, typography = MaterialTheme.typography, content = content)
 }

@@ -216,3 +216,31 @@ private inline fun <T> runCatchingNonCancel(block: () -> T): Result<T> =
     } catch (e: Exception) {
         Result.failure(e)
     }
+
+/** GOES-East/West satellite imagery from NOAA nowCOAST, drawn under the radar. */
+@kotlinx.serialization.Serializable
+enum class SatelliteImagery(val label: String, val layer: String?) {
+    /** Visible imagery by day, infrared at night (visible is black after dark). */
+    AUTO("Auto (visible by day, infrared at night)", null),
+    VISIBLE("Visible", "goes_visible_imagery"),
+    INFRARED("Infrared (clouds day and night)", "goes_longwave_imagery"),
+    WATER_VAPOR("Water vapor", "goes_water_vapor_imagery");
+
+    companion object {
+        const val NOWCOAST_WMS = "https://nowcoast.noaa.gov/geoserver/satellite/wms"
+        const val ATTRIBUTION = "GOES imagery: NOAA nowCOAST"
+
+        /** Concrete layer for [choice]; AUTO picks by daylight at the map center. */
+        fun resolve(choice: SatelliteImagery, daylight: Boolean): SatelliteImagery = when (choice) {
+            AUTO -> if (daylight) VISIBLE else INFRARED
+            else -> choice
+        }
+
+        /** WMS GetMap template for MapLibre raster tiles; nowCOAST serves the latest scan by default. */
+        fun tileUrl(imagery: SatelliteImagery, base: String = NOWCOAST_WMS): String {
+            val layer = requireNotNull(imagery.layer) { "Resolve AUTO first" }
+            return "$base?service=WMS&version=1.3.0&request=GetMap&layers=$layer&styles=&format=image/png" +
+                "&transparent=true&crs=EPSG:3857&width=256&height=256&bbox={bbox-epsg-3857}"
+        }
+    }
+}

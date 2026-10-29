@@ -2,7 +2,9 @@ package app.northvane.weather
 
 import android.app.Application
 import app.northvane.core.net.HttpClients
+import app.northvane.core.history.AcisClient
 import app.northvane.core.nws.NwsClient
+import app.northvane.core.pollen.PollenClient
 import app.northvane.core.owm.OwmClient
 import app.northvane.core.radar.RadarService
 import app.northvane.core.repo.WeatherRepository
@@ -50,9 +52,10 @@ class AppContainer(private val app: Application) {
     val owm: OwmClient by lazy { OwmClient(http) }
     val weewx: WeeWxClient by lazy { WeeWxClient(HttpClients.localServerClients(http)) }
     val radar: RadarService by lazy { RadarService(http) }
+    val pollen: PollenClient by lazy { PollenClient(http) }
 
     val repository: WeatherRepository by lazy {
-        WeatherRepository(nws, owm, weewx, weatherCache.pointCache)
+        WeatherRepository(nws, owm, weewx, weatherCache.pointCache, acis = AcisClient(http), pollen = pollen)
     }
 
     val weather: WeatherService by lazy {

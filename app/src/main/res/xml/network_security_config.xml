@@ -26,6 +26,8 @@
         <domain includeSubdomains="true">iastate.edu</domain>
         <domain includeSubdomains="true">openfreemap.org</domain>
         <domain includeSubdomains="true">openweathermap.org</domain>
+        <domain includeSubdomains="true">rcc-acis.org</domain>
+        <domain includeSubdomains="true">pollen.googleapis.com</domain>
         <trust-anchors>
             <certificates src="system" />
         </trust-anchors>

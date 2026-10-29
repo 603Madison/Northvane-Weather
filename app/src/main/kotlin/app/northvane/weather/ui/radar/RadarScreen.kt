@@ -58,6 +58,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.northvane.core.radar.RadarSource
+import app.northvane.core.radar.SatelliteImagery
+import app.northvane.core.util.Solar
+import java.time.Instant
 import app.northvane.weather.AppContainer
 import app.northvane.weather.data.SatelliteFeature
 import app.northvane.weather.ui.MainUiState
@@ -98,7 +101,7 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
                     Column {
                         Text("Radar")
                         location?.let {
-                            Text(it.name, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(it.displayName, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 },
@@ -128,12 +131,29 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
                 )
                 else -> {
                     LaunchedEffect(Unit) { vm.ensureLoaded() }
+                    val settings = state.settings
+                    val satelliteAllowed = !state.liteMode || SatelliteFeature.SATELLITE_IMAGERY in settings.satelliteFeatures || loadOnSatellite
+                    val imagery = remember(settings.satelliteImagery, location.latitude, location.longitude, radar.loadedAt) {
+                        SatelliteImagery.resolve(
+                            settings.satelliteImagery,
+                            Solar.isDaylight(location.latitude, location.longitude, Instant.now()),
+                        )
+                    }
                     RadarMap(
                         center = location.point,
                         frames = radar.frames,
                         index = radar.index,
                         dark = dark,
                         modifier = Modifier.fillMaxSize(),
+                        pin = location.point,
+                        satelliteTiles = if (settings.satelliteLayer && satelliteAllowed) SatelliteImagery.tileUrl(imagery) else null,
+                    )
+                    SatelliteToggle(
+                        on = settings.satelliteLayer,
+                        allowed = satelliteAllowed,
+                        label = imagery.label.substringBefore(" ("),
+                        onToggle = { vm.setSatelliteLayer(!settings.satelliteLayer) },
+                        modifier = Modifier.align(Alignment.TopEnd).padding(12.dp),
                     )
                     if (radar.loading) {
                         LinearProgressIndicator(
@@ -146,6 +166,7 @@ fun RadarScreen(state: MainUiState, container: AppContainer, onOpenSettings: () 
                     Controls(
                         state = radar,
                         time = time,
+                        satellite = settings.satelliteLayer && satelliteAllowed,
                         onTogglePlay = vm::togglePlay,
                         onSeek = vm::seek,
                         modifier = Modifier
@@ -189,6 +210,7 @@ private fun SourceMenu(current: RadarSource, onSelect: (RadarSource) -> Unit, on
 private fun Controls(
     state: RadarUiState,
     time: TimeFormat,
+    satellite: Boolean,
     onTogglePlay: () -> Unit,
     onSeek: (Int) -> Unit,
     modifier: Modifier = Modifier,
@@ -234,10 +256,40 @@ private fun Controls(
             Text(
                 buildString {
                     append(state.source.attribution)
+                    if (satellite) append(" · ${SatelliteImagery.ATTRIBUTION}")
                     if (state.frames.any { it.isForecast }) append(" · Future: NOAA HRRR model via Iowa Environmental Mesonet")
                 },
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun SatelliteToggle(on: Boolean, allowed: Boolean, label: String, onToggle: () -> Unit, modifier: Modifier = Modifier) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.92f),
+        onClick = onToggle,
+        modifier = modifier,
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                NorthvaneIcons.Satellite,
+                contentDescription = null,
+                tint = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                when {
+                    on && !allowed -> "Satellite (paused)"
+                    on -> "Satellite · $label"
+                    else -> "Satellite"
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = if (on) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
             )
         }
     }

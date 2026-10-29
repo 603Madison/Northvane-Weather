@@ -6,7 +6,10 @@ import app.northvane.core.model.WeatherSnapshot
 import app.northvane.core.repo.FetchPlan
 import app.northvane.core.model.DetailSource
 import app.northvane.core.model.Section
-import app.northvane.core.outage.OutageEstimator
+import app.northvane.core.outlook.Outlooks
+import app.northvane.core.pollen.AndroidKeyRestriction
+import app.northvane.core.pollen.PollenPricing
+import app.northvane.core.weewx.WeeWxStation
 import java.time.LocalDate
 import java.time.ZoneId
 import app.northvane.core.repo.SourceConfig
@@ -42,13 +45,15 @@ class WeatherService(
 
     suspend fun refresh(location: SavedLocation): WeatherSnapshot {
         val appSettings = settings.settings.first()
-        val station = locations.stations.first().firstOrNull { it.enabled && it.linkedLocationId == location.id }
+        val station = WeeWxStation.forLocation(locations.stations.first(), location)
         val config = withContext(Dispatchers.IO) {
             SourceConfig(
                 weewxStation = station,
                 weewxSecret = station?.takeIf { it.auth != WeeWxAuth.NONE }
                     ?.let { WeeWxSecret(secrets.get(SecretStore.weewxSecret(it.id))) },
                 owmApiKey = if (appSettings.owmEnabled) secrets.get(SecretStore.OWM_API_KEY) else null,
+                pollenApiKey = if (appSettings.pollenEnabled) secrets.get(SecretStore.POLLEN_API_KEY) else null,
+                pollenRestriction = AppSignature.restriction(context),
                 // Fail fast with an explanation rather than waiting out a blocked connection.
                 weewxBlockedReason = if (station != null && LocalNetworkAccess.needsPermissionFor(context, station.url)) {
                     LocalNetworkAccess.DENIED_MESSAGE
@@ -57,11 +62,46 @@ class WeatherService(
                 },
             )
         }
-        val plan = currentPlan(appSettings)
+        val previous = cache.read(location.id)
+        val plan = throttled(currentPlan(appSettings), previous)
         val fresh = repository.fetch(location, config, plan)
-        val merged = withCachedStandIns(fresh, cache.read(location.id))
+        val merged = Outlooks.annotate(
+            withSlowSections(withCachedStandIns(fresh, previous), previous, pollenWanted = config.pollenApiKey != null),
+            location.latitude,
+            location.longitude,
+        )
         cache.write(merged)
         return merged
+    }
+
+    /**
+     * Pollen and recent-weather history change once a day, so they're fetched
+     * at most every [PollenPricing.MIN_REFRESH_HOURS] hours per location. This
+     * also keeps a Google Pollen key well inside its free monthly allowance.
+     */
+    private fun throttled(plan: FetchPlan, previous: WeatherSnapshot?): FetchPlan {
+        if (previous == null) return plan
+        val now = Instant.now()
+        val maxAge = Duration.ofHours(PollenPricing.MIN_REFRESH_HOURS)
+        fun recent(t: Instant?) = t != null && Duration.between(t, now) < maxAge
+        var sections = plan.sections
+        if (recent(previous.history?.fetchedAt)) sections = sections - Section.HISTORY
+        if (recent(previous.pollen?.fetchedAt)) sections = sections - Section.POLLEN
+        return plan.copy(sections = sections)
+    }
+
+    /** Keeps the last pollen forecast and weather history when this refresh didn't fetch them. */
+    private fun withSlowSections(fresh: WeatherSnapshot, previous: WeatherSnapshot?, pollenWanted: Boolean): WeatherSnapshot {
+        if (previous == null) return fresh
+        val now = Instant.now()
+        val zone = runCatching { ZoneId.of(fresh.timeZoneId) }.getOrDefault(ZoneId.systemDefault())
+        val today = LocalDate.now(zone)
+        val history = fresh.history ?: previous.history?.takeIf { Duration.between(it.fetchedAt, now) < Duration.ofDays(3) }
+        val pollen = fresh.pollen ?: previous.pollen?.takeIf { pollenWanted }
+            ?.let { p -> p.copy(days = p.days.filter { !it.date.isBefore(today) }) }
+            ?.takeIf { it.days.isNotEmpty() }
+        val throttled = setOf(Section.HISTORY, Section.POLLEN)
+        return fresh.copy(history = history, pollen = pollen, skippedSections = fresh.skippedSections - throttled)
     }
 
     /**
@@ -102,6 +142,6 @@ class WeatherService(
                 },
             )
         }
-        return result.copy(daily = OutageEstimator.annotate(result.daily, result.alerts, zone))
+        return result
     }
 }

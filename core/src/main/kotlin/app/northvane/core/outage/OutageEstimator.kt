@@ -1,6 +1,8 @@
 package app.northvane.core.outage
 
 import app.northvane.core.model.DailyForecast
+import app.northvane.core.model.MudLevel
+import app.northvane.core.model.MudOutlook
 import app.northvane.core.model.OutageFactor
 import app.northvane.core.model.OutageFactor.Kind
 import app.northvane.core.model.OutageLevel
@@ -29,16 +31,24 @@ import kotlin.math.roundToInt
  * - **Saturated ground** from heavy rain, which lets wind uproot trees.
  * - **Thunderstorms** and active NWS hazard alerts covering the day.
  *
+ * The season matters: leaf cover follows the estimated leaf-out and fall
+ * foliage for the location (bare trees from late fall to spring catch far
+ * less wind); frozen ground anchors roots in winter, while thawing,
+ * waterlogged ground in mud season lets trees topple in moderate wind.
+ *
  * Scores are 0–100: the strongest factor plus a share of the others.
  */
 object OutageEstimator {
 
-    fun annotate(days: List<DailyForecast>, alerts: List<WeatherAlert>, zone: ZoneId): List<DailyForecast> =
-        days.map { it.copy(outageRisk = estimate(it, alerts, zone)) }
+    fun annotate(days: List<DailyForecast>, alerts: List<WeatherAlert>, zone: ZoneId, context: OutageContext? = null): List<DailyForecast> =
+        days.map { it.copy(outageRisk = estimate(it, alerts, zone, context)) }
 
-    fun estimate(day: DailyForecast, alerts: List<WeatherAlert>, zone: ZoneId): OutageRisk {
+    fun estimate(day: DailyForecast, alerts: List<WeatherAlert>, zone: ZoneId, context: OutageContext? = null): OutageRisk {
         val factors = mutableListOf<Pair<OutageFactor, Double>>() // factor, score
-        val leaves = foliage(day.date)
+        val leaves = (context?.leafCover?.invoke(day.date) ?: foliage(day.date)).coerceIn(0.0, 1.0)
+        val ground = context?.mud?.get(day.date)
+        val frozenGround = ground?.level == MudLevel.FROZEN || (ground?.level == MudLevel.SNOW_COVERED && !ground.mudSeason)
+        val softGround = ground != null && (ground.mudSeason || ground.level == MudLevel.VERY_MUDDY)
 
         // Wind. Gusts are what break limbs; sustained wind is a lesser signal.
         val gustMph = day.gustMaxKph?.let(Units::kphToMph)
@@ -53,12 +63,20 @@ object OutageEstimator {
         }
         if (leaves >= 0.5 && (gustMph ?: 0.0) >= 30) {
             factors += OutageFactor(Kind.LEAVES_ON) to 0.0 // explains the boost above
+        } else if (leaves < 0.2 && (gustMph ?: 0.0) >= 40) {
+            factors += OutageFactor(Kind.LEAVES_OFF) to 0.0 // explains why the same gusts score lower now
         }
 
-        // Saturated ground + wind: heavy rain lets gusts uproot whole trees.
+        // Saturated ground + wind: heavy rain lets gusts uproot whole trees; frozen ground resists.
         val rainIn = day.precipitationMm?.let(Units::mmToInches) ?: 0.0
         if (rainIn >= 1.0 && (gustMph ?: 0.0) >= 30) {
-            factors += OutageFactor(Kind.SATURATED_GROUND, day.precipitationMm) to ramp(rainIn, listOf(1.0 to 15.0, 2.0 to 30.0, 3.0 to 40.0))
+            val score = ramp(rainIn, listOf(1.0 to 15.0, 2.0 to 30.0, 3.0 to 40.0)) * if (frozenGround) 0.4 else 1.0
+            factors += OutageFactor(Kind.SATURATED_GROUND, day.precipitationMm) to score
+        } else if (softGround && (gustMph ?: 0.0) >= 30) {
+            factors += OutageFactor(Kind.SOFT_GROUND) to ramp(gustMph!!, listOf(30.0 to 10.0, 45.0 to 25.0, 60.0 to 35.0))
+        }
+        if (frozenGround && (gustMph ?: 0.0) >= 40) {
+            factors += OutageFactor(Kind.FROZEN_GROUND) to 0.0
         }
 
         // Ice accretion.
@@ -115,10 +133,10 @@ object OutageEstimator {
             else -> OutageLevel.LOW
         }
         val ordered = factors.sortedByDescending { it.second }.map { it.first }.distinctBy { it.kind to it.detail }
-        return OutageRisk(level, total, ordered)
+        return OutageRisk(level, total, ordered, leafCover = leaves)
     }
 
-    /** Fraction of full leaf-out for New England hardwoods. */
+    /** Calendar fallback for the fraction of full leaf-out (southern New England), when no location is known. */
     fun foliage(date: LocalDate): Double {
         val md = MonthDay.from(date)
         return when {
@@ -160,3 +178,9 @@ object OutageEstimator {
         "Winter Storm Watch" to 20.0,
     )
 }
+
+/** Seasonal state for a location: leaf cover by date, and ground conditions (frozen, thawing) from the mud model. */
+class OutageContext(
+    val leafCover: ((LocalDate) -> Double)? = null,
+    val mud: Map<LocalDate, MudOutlook> = emptyMap(),
+)

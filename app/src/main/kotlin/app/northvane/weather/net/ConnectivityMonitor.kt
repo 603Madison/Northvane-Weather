@@ -113,6 +113,8 @@ fun fetchPlanFor(settings: AppSettings, status: NetworkStatus): FetchPlan {
         if (SatelliteFeature.HOURLY_FORECAST in features) add(Section.HOURLY_FORECAST)
         if (SatelliteFeature.FORECAST_DETAILS in features) add(Section.FORECAST_DETAILS)
         if (SatelliteFeature.OWM_FALLBACK in features) add(Section.OWM_FALLBACK)
+        if (SatelliteFeature.HISTORY in features) add(Section.HISTORY)
+        if (SatelliteFeature.POLLEN in features) add(Section.POLLEN)
     }
     return FetchPlan(sections = sections, observationStations = 1, limited = true)
 }

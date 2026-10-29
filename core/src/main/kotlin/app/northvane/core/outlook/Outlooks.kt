@@ -1,0 +1,34 @@
+package app.northvane.core.outlook
+
+import app.northvane.core.model.WeatherSnapshot
+import app.northvane.core.outage.OutageContext
+import app.northvane.core.outage.OutageEstimator
+import java.time.Instant
+import java.time.ZoneId
+
+/**
+ * Derived outlooks for a snapshot: mud, fall foliage, activity scores and
+ * the season-aware power outage estimate. Pure functions of the snapshot, so
+ * they're recomputed whenever cached sections are merged into a fresh one.
+ */
+object Outlooks {
+    fun annotate(s: WeatherSnapshot, latitude: Double, longitude: Double, now: Instant = s.fetchedAt): WeatherSnapshot {
+        val zone = runCatching { ZoneId.of(s.timeZoneId) }.getOrDefault(ZoneId.systemDefault())
+        val today = now.atZone(zone).toLocalDate()
+        val elevation = s.history?.elevationM ?: s.elevationM
+        val days = Periods.fill(s.daily, s.hourly, grid = null, zone = zone)
+
+        val mud = MudEstimator.forecast(s.history, days, today)
+        val foliage = FoliageEstimator.report(latitude, s.history, days, today)
+        val ctx = ActivityScorer.Context(latitude, longitude, zone, s.alerts)
+        val outage = OutageContext(
+            leafCover = { date -> FoliageEstimator.leafCover(date, latitude, elevation, foliage) },
+            mud = mud,
+        )
+        val annotated = OutageEstimator.annotate(days, s.alerts, zone, outage).map { d ->
+            val dayMud = mud[d.date]
+            d.copy(mud = dayMud, activities = ActivityScorer.score(d, dayMud, ctx))
+        }
+        return s.copy(daily = annotated, foliage = foliage, latitude = latitude, elevationM = elevation)
+    }
+}

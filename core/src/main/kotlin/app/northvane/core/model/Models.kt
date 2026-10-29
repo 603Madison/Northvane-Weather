@@ -15,6 +15,8 @@ enum class DataSource(val displayName: String) {
     NWS("National Weather Service"),
     OWM("OpenWeatherMap"),
     NWS_FORECAST_ESTIMATE("NWS hourly forecast"),
+    NOAA_ACIS("NOAA climate data (ACIS)"),
+    GOOGLE_POLLEN("Google Pollen API"),
 }
 
 @Serializable
@@ -29,6 +31,16 @@ data class GeoPoint(val latitude: Double, val longitude: Double) {
      * and there is no reason to send anyone a more precise position than this.
      */
     fun rounded(): GeoPoint = GeoPoint(round4(latitude).toDouble(), round4(longitude).toDouble())
+
+    /** Great-circle distance in kilometres. */
+    fun distanceKm(other: GeoPoint): Double {
+        val dLat = Math.toRadians(other.latitude - latitude)
+        val dLon = Math.toRadians(other.longitude - longitude)
+        val a = kotlin.math.sin(dLat / 2).let { it * it } +
+            kotlin.math.cos(Math.toRadians(latitude)) * kotlin.math.cos(Math.toRadians(other.latitude)) *
+            kotlin.math.sin(dLon / 2).let { it * it }
+        return 6371.0 * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+    }
 
     /** Canonical "lat,lon" form expected by api.weather.gov (no trailing zeros). */
     fun nwsKey(): String = "${format(latitude)},${format(longitude)}"
@@ -49,7 +61,13 @@ data class SavedLocation(
     val longitude: Double,
     /** True for the entry that tracks the device's position. */
     val isDeviceLocation: Boolean = false,
+    /** User-chosen name shown instead of [name]; [name] stays the place name from search or geocoding. */
+    val nickname: String? = null,
+    /** Whether background alert checks (and notifications) cover this location. */
+    val notify: Boolean = true,
 ) {
+    val displayName: String get() = nickname?.takeIf { it.isNotBlank() } ?: name
+
     val point: GeoPoint get() = GeoPoint(latitude, longitude)
 }
 
@@ -128,11 +146,21 @@ data class DailyForecast(
     /** Where the quantitative values came from: gridpoint numbers, or parsed from forecast text. */
     val detailSource: DetailSource? = null,
     val outageRisk: OutageRisk? = null,
+    /** Daytime (08–18) and overnight (20–07 the next morning) summaries, for activity scores. */
+    val daytime: PeriodStats? = null,
+    val overnight: PeriodStats? = null,
+    val mud: MudOutlook? = null,
+    val activities: List<ActivityScore> = emptyList(),
 )
 
 /** Parts of a refresh that can be switched on or off individually (e.g. over satellite). */
 @Serializable
-enum class Section { CURRENT_CONDITIONS, LOCAL_STATION, ALERTS, DAILY_FORECAST, HOURLY_FORECAST, FORECAST_DETAILS, OWM_FALLBACK }
+enum class Section {
+    CURRENT_CONDITIONS, LOCAL_STATION, ALERTS, DAILY_FORECAST, HOURLY_FORECAST, FORECAST_DETAILS, OWM_FALLBACK,
+    /** Recent observed weather (NOAA ACIS), for mud, foliage and seasonal outage estimates. */
+    HISTORY,
+    POLLEN,
+}
 
 @Serializable
 enum class DetailSource { GRID, TEXT, OWM }
@@ -144,11 +172,19 @@ enum class OutageLevel(val label: String) { LOW("Low"), ELEVATED("Elevated"), HI
 @Serializable
 data class OutageFactor(val kind: Kind, val value: Double? = null, val detail: String? = null) {
     @Serializable
-    enum class Kind { GUSTS, LEAVES_ON, ICE, WET_SNOW, SNOW, THUNDER, SATURATED_GROUND, ALERT, HEAT, SUSTAINED_WIND }
+    enum class Kind {
+        GUSTS, LEAVES_ON, ICE, WET_SNOW, SNOW, THUNDER, SATURATED_GROUND, ALERT, HEAT, SUSTAINED_WIND,
+        /** Explanatory: bare trees catch less wind (late fall to spring). */
+        LEAVES_OFF,
+        /** Explanatory: frozen ground anchors roots, so wind uproots fewer trees. */
+        FROZEN_GROUND,
+        /** Thawing or rain-soaked ground lets wind uproot trees more easily. */
+        SOFT_GROUND,
+    }
 }
 
 @Serializable
-data class OutageRisk(val level: OutageLevel, val score: Int, val factors: List<OutageFactor>)
+data class OutageRisk(val level: OutageLevel, val score: Int, val factors: List<OutageFactor>, val leafCover: Double? = null)
 
 @Serializable
 enum class AlertSeverity { EXTREME, SEVERE, MODERATE, MINOR, UNKNOWN }
@@ -207,4 +243,14 @@ data class WeatherSnapshot(
     @Serializable(InstantSerializer::class) val sunset: Instant? = null,
     /** Sections this refresh deliberately didn't download (satellite settings); cached data may stand in. */
     val skippedSections: Set<Section> = emptySet(),
-)
+    val history: WeatherHistory? = null,
+    val pollen: PollenForecast? = null,
+    val foliage: FoliageReport? = null,
+    val latitude: Double? = null,
+    val elevationM: Double? = null,
+) {
+    /** True while an NWS warning (not a watch, advisory or statement) is in effect. */
+    fun hasActiveWarning(now: Instant): Boolean = alerts.any { a ->
+        a.category == AlertCategory.WARNING && (a.ends ?: a.expires)?.isAfter(now) != false
+    }
+}

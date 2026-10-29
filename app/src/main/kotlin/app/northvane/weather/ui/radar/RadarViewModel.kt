@@ -86,6 +86,10 @@ class RadarViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun setSatelliteLayer(enabled: Boolean) {
+        viewModelScope.launch { container.settings.setSatelliteLayer(enabled) }
+    }
+
     fun seek(index: Int) {
         stop()
         _state.update { it.copy(index = index.coerceIn(0, (it.frames.size - 1).coerceAtLeast(0))) }

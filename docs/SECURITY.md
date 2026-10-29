@@ -50,7 +50,7 @@ weather services described below.
 
 ## Secrets
 
-- The OpenWeatherMap key and WeeWX passwords/tokens are encrypted with
+- The OpenWeatherMap key, the Google Pollen API key and WeeWX passwords/tokens are encrypted with
   AES-256-GCM under a non-exportable **Android Keystore** key
   (`SecretStore`). The entry name is bound as associated data.
 - Secrets are write-only in the UI: screens show whether a value is saved,
@@ -59,6 +59,12 @@ weather services described below.
 - The OpenWeatherMap key travels as a query parameter (OWM's API requires it).
   Those requests are sent with `Cache-Control: no-store`, so the URL is never
   written to the HTTP disk cache.
+- The Google Pollen API key is sent only in the `X-Goog-Api-Key` header, never
+  in the URL, with `Cache-Control: no-store`. Requests also carry the app's
+  package name and signing-certificate SHA-1 (`X-Android-Package` /
+  `X-Android-Cert`, both public), so users can restrict their key to this
+  app in Google Cloud Console. Settings recommends restricting the key to the
+  Pollen API and setting a daily quota so a leaked key can't run up a bill.
 - No secrets, URLs or coordinates are logged, and R8 strips `Log.v/d/i` from
   release builds.
 
@@ -88,8 +94,12 @@ weather services described below.
   limits what leaves the device on that network.
 - Requests go only to: api.weather.gov (NWS), mapservices.weather.noaa.gov
   (NOAA radar), mesonet.agron.iastate.edu (HRRR future cast / alternative
-  radar), tiles.openfreemap.org (basemap), the user's WeeWX server, and
-  api.openweathermap.org (only if enabled with the user's key).
+  radar), nowcoast.noaa.gov (satellite imagery, only when the layer is on),
+  data.rcc-acis.org (NOAA ACIS recent observed weather, at most every 6 hours
+  per place), tiles.openfreemap.org (basemap), the user's WeeWX server,
+  pollen.googleapis.com (only with the user's key; coordinates rounded to
+  about 1 km) and api.openweathermap.org (only if enabled with the user's key).
+- All of these hosts are HTTPS-only with system CAs in the network security config.
 - Place search uses the platform `Geocoder` (on most devices this is backed
   by the system location provider) and OpenWeatherMap geocoding only if the
   user enabled OWM.

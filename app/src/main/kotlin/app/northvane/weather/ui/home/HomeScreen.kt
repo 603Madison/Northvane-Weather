@@ -99,7 +99,11 @@ import app.northvane.weather.ui.TimeFormat
 import app.northvane.weather.ui.components.NorthvaneIcons
 import app.northvane.weather.ui.components.WeatherIcon
 import app.northvane.weather.ui.theme.alertColor
+import app.northvane.weather.ui.theme.WarningTheme
 import app.northvane.weather.ui.theme.skyGradient
+import app.northvane.weather.ui.theme.warningGradient
+import app.northvane.core.model.AlertCategory
+import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.roundToInt
 
@@ -120,6 +124,25 @@ fun HomeScreen(
     onOpenAlerts: () -> Unit,
     onOpenLocations: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenSources: () -> Unit = onOpenSettings,
+) {
+    val snapshot = state.snapshot
+    // A warning (not a watch, advisory or statement) turns the Today screen red.
+    val warning = remember(snapshot?.alerts, snapshot?.fetchedAt) { snapshot?.hasActiveWarning(Instant.now()) == true }
+    WarningTheme(active = warning) {
+        HomeContent(state, actions, warning, onOpenAlerts, onOpenLocations, onOpenSettings, onOpenSources)
+    }
+}
+
+@Composable
+private fun HomeContent(
+    state: MainUiState,
+    actions: HomeActions,
+    warning: Boolean,
+    onOpenAlerts: () -> Unit,
+    onOpenLocations: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenSources: () -> Unit,
 ) {
     val context = LocalContext.current
     val snapshot = state.snapshot
@@ -202,7 +225,7 @@ fun HomeScreen(
                     if (snapshot == null) {
                         item { LoadingCard(state.refreshing) }
                     } else {
-                        item { HeroCard(snapshot, formatter, time) }
+                        item { HeroCard(snapshot, formatter, time, warning) }
                         if (snapshot.alerts.isNotEmpty()) {
                             item { AlertBanner(snapshot.alerts, time, onOpenAlerts) }
                         }
@@ -211,8 +234,30 @@ fun HomeScreen(
                         } else if (Section.HOURLY_FORECAST in snapshot.skippedSections) {
                             item { HintText("Hourly forecast is turned off for satellite connections.") }
                         }
+                        val settings = state.settings
+                        val activities = if (settings.activitiesEnabled) settings.activities else emptySet()
                         if (snapshot.daily.isNotEmpty()) {
-                            item { DailySection(snapshot.daily, formatter, time, showOutage = state.settings.outageRiskEnabled) }
+                            item {
+                                DailySection(
+                                    snapshot.daily, formatter, time,
+                                    showOutage = settings.outageRiskEnabled,
+                                    activities = activities,
+                                    showMud = settings.mudEnabled,
+                                )
+                            }
+                        }
+                        if (activities.isNotEmpty()) {
+                            item { ActivitiesSection(snapshot.daily, activities, formatter, time) }
+                        }
+                        if (settings.mudEnabled && snapshot.daily.any { it.mud != null }) {
+                            item { MudSection(snapshot.daily, formatter, time) }
+                        }
+                        if (settings.pollenEnabled) {
+                            item { PollenSection(snapshot.pollen, hasKey = state.pollenKeySet, time = time, onOpenSources = onOpenSources) }
+                        }
+                        val foliage = snapshot.foliage
+                        if (settings.foliageEnabled && foliage != null) {
+                            item { FoliageSection(foliage, time) }
                         }
                         snapshot.current?.let { current ->
                             item { DetailsSection(current, formatter) }
@@ -255,7 +300,7 @@ private fun LocationTopBar(
                         Spacer(Modifier.width(4.dp))
                     }
                     Text(
-                        state.selected?.name ?: "Northvane",
+                        state.selected?.displayName ?: "Northvane",
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.widthIn(max = 240.dp),
@@ -267,7 +312,7 @@ private fun LocationTopBar(
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                     state.locations.forEach { location ->
                         DropdownMenuItem(
-                            text = { Text(location.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                            text = { Text(location.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                             leadingIcon = if (location.isDeviceLocation) {
                                 { Icon(Icons.Filled.LocationOn, contentDescription = null) }
                             } else {
@@ -309,13 +354,13 @@ private fun LocationTopBar(
 }
 
 @Composable
-private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeFormat) {
+private fun HeroCard(snapshot: WeatherSnapshot, f: UnitFormatter, time: TimeFormat, warning: Boolean) {
     val current = snapshot.current
     val today = snapshot.daily.firstOrNull { it.date == time.today() } ?: snapshot.daily.firstOrNull()
     val condition = current?.condition ?: today?.condition ?: WeatherCondition.UNKNOWN
     val isDay = current?.isDaytime ?: true
     val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
-    val gradient = remember(condition, isDay, dark) { skyGradient(condition, isDay, dark) }
+    val gradient = remember(condition, isDay, dark, warning) { if (warning) warningGradient(dark) else skyGradient(condition, isDay, dark) }
     val onHero = Color.White
 
     Box(
@@ -370,6 +415,7 @@ private fun SourceBadge(current: CurrentConditions, time: TimeFormat) {
         DataSource.NWS -> current.stationName ?: "NWS observation"
         DataSource.OWM -> "OpenWeatherMap"
         DataSource.NWS_FORECAST_ESTIMATE -> "Estimated from NWS forecast"
+        DataSource.NOAA_ACIS, DataSource.GOOGLE_POLLEN -> current.source.displayName
     }
     val age = current.observedAt?.let { " · ${TimeFormat.ago(it)}" }.orEmpty()
     Surface(shape = RoundedCornerShape(50), color = Color.White.copy(alpha = 0.18f)) {
@@ -396,23 +442,26 @@ private fun SourceBadge(current: CurrentConditions, time: TimeFormat) {
 private fun AlertBanner(alerts: List<WeatherAlert>, time: TimeFormat, onClick: () -> Unit) {
     val top = AlertClassifier.mostUrgent(alerts) ?: return
     val color = alertColor(top.category)
+    // Warnings get a solid banner; watches, advisories and statements keep the light tint.
+    val solid = top.category == AlertCategory.WARNING
+    val onBanner = if (solid) Color.White else MaterialTheme.colorScheme.onSurface
     Card(
         onClick = onClick,
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(containerColor = color.copy(alpha = 0.14f)),
+        colors = CardDefaults.cardColors(containerColor = if (solid) color else color.copy(alpha = 0.14f)),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Warning, contentDescription = null, tint = color)
+            Icon(Icons.Filled.Warning, contentDescription = null, tint = if (solid) Color.White else color)
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(top.event, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurface)
+                Text(top.event, style = MaterialTheme.typography.titleMedium, color = onBanner)
                 val until = (top.ends ?: top.expires)?.let { "Until ${time.smart(it)}" }
                 val more = if (alerts.size > 1) "+${alerts.size - 1} more" else null
                 Text(
                     listOfNotNull(until, more).joinToString(" · ").ifEmpty { "Tap for details" },
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (solid) Color.White.copy(alpha = 0.9f) else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
         }

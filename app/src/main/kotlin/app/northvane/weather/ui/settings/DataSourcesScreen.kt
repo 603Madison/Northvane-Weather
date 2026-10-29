@@ -36,6 +36,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableDoubleStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,7 +51,25 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.northvane.core.model.GeoPoint
 import app.northvane.core.model.SavedLocation
+import app.northvane.core.model.UnitSystem
+import app.northvane.core.model.Units
+import app.northvane.core.outlook.OutlookText
+import app.northvane.core.pollen.PollenClient
+import app.northvane.core.pollen.PollenPricing
+import app.northvane.weather.data.AppSignature
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Surface
+import androidx.core.content.ContextCompat
+import kotlin.math.roundToInt
 import app.northvane.core.net.UrlPolicy
 import app.northvane.core.net.toUserMessage
 import app.northvane.core.owm.OwmClient
@@ -123,15 +142,17 @@ fun DataSourcesScreen(
 
             SectionCard("WeeWX local station") {
                 Text(
-                    "Current conditions from your own station replace NWS observations for the linked location. " +
-                        "Sky condition and anything your station doesn't measure still come from NWS.",
+                    "Current conditions from your own station replace NWS observations for every saved location within " +
+                        "the radius you choose around the station. Sky condition and anything your station doesn't measure " +
+                        "still come from NWS.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 stations.forEach { station ->
                     StationRow(
                         station = station,
-                        linkedName = state.locations.firstOrNull { it.id == station.linkedLocationId }?.name,
+                        covered = state.locations.filter { station.covers(it) }.map { it.displayName },
+                        units = UnitFormatter(state.settings.units),
                         onEdit = { editing = station to false },
                         onDelete = { deleting = station },
                     )
@@ -148,7 +169,8 @@ fun DataSourcesScreen(
                             id = UUID.randomUUID().toString(),
                             name = "My station",
                             url = "",
-                            linkedLocationId = state.selected?.id,
+                            latitude = state.selected?.latitude,
+                            longitude = state.selected?.longitude,
                         ) to true
                     },
                 ) {
@@ -163,6 +185,18 @@ fun DataSourcesScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+
+            PollenSection(
+                state = state,
+                container = container,
+                onEnabledChange = { enabled ->
+                    scope.launch {
+                        container.settings.setPollen(enabled)
+                        onSourcesChanged()
+                    }
+                },
+                onKeyChanged = onSourcesChanged,
+            )
 
             OwmSection(
                 enabled = state.settings.owmEnabled,
@@ -242,15 +276,20 @@ private fun NwsSection(savedContact: String?, onSave: (String?) -> Unit) {
 }
 
 @Composable
-private fun StationRow(station: WeeWxStation, linkedName: String?, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun StationRow(station: WeeWxStation, covered: List<String>, units: UnitFormatter, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.weight(1f)) {
             Text(station.name + if (!station.enabled) " (off)" else "", style = MaterialTheme.typography.bodyLarge)
             val host = runCatching { java.net.URI(station.url).host }.getOrNull() ?: station.url
+            val where = when {
+                !station.hasPosition && station.linkedLocationId == null -> "location not set"
+                covered.isEmpty() -> "no saved places within ${radiusLabel(station.radiusKm, units)}"
+                else -> "used for " + covered.joinToString(", ")
+            }
             Text(
-                "$host · " + (linkedName?.let { "used for $it" } ?: "not linked to a location"),
+                "$host · $where",
                 style = MaterialTheme.typography.bodySmall,
-                color = if (linkedName == null) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (covered.isEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit ${station.name}") }
@@ -349,7 +388,12 @@ private fun StationEditor(
     var username by remember { mutableStateOf(initial.username.orEmpty()) }
     var headerName by remember { mutableStateOf(initial.headerName.orEmpty()) }
     var secret by remember { mutableStateOf("") }
-    var linked by remember { mutableStateOf(initial.linkedLocationId) }
+    // Older stations were paired with one saved place; start from that place's position.
+    val legacy = locations.firstOrNull { it.id == initial.linkedLocationId }
+    var latText by remember { mutableStateOf((initial.latitude ?: legacy?.latitude)?.let(GeoPoint::format).orEmpty()) }
+    var lonText by remember { mutableStateOf((initial.longitude ?: legacy?.longitude)?.let(GeoPoint::format).orEmpty()) }
+    var radiusKm by remember { mutableDoubleStateOf(initial.radiusKm) }
+    var locating by remember { mutableStateOf(false) }
     var maxAge by remember { mutableStateOf(initial.maxAgeMinutes.toString()) }
     var enabled by remember { mutableStateOf(initial.enabled) }
     var hasSavedSecret by remember { mutableStateOf(false) }
@@ -386,7 +430,10 @@ private fun StationEditor(
         auth = auth,
         username = username.trim().takeIf { auth == WeeWxAuth.BASIC && it.isNotEmpty() },
         headerName = headerName.trim().takeIf { auth == WeeWxAuth.HEADER && it.isNotEmpty() },
-        linkedLocationId = linked,
+        latitude = latText.trim().toDoubleOrNull()?.takeIf { it in -90.0..90.0 },
+        longitude = lonText.trim().toDoubleOrNull()?.takeIf { it in -180.0..180.0 },
+        radiusKm = radiusKm,
+        linkedLocationId = null,
         maxAgeMinutes = maxAge.toIntOrNull()?.coerceIn(5, 24 * 60) ?: 30,
         enabled = enabled,
     )
@@ -394,6 +441,7 @@ private fun StationEditor(
     fun validate(station: WeeWxStation): String? {
         (UrlPolicy.validateUserServerUrl(station.url, station.auth != WeeWxAuth.NONE) as? UrlPolicy.Validation.Invalid)
             ?.let { return it.reason }
+        if (!station.hasPosition) return "Set the station's location (latitude and longitude)"
         if (station.auth == WeeWxAuth.BASIC && station.username.isNullOrEmpty()) return "Enter a username"
         if (station.auth == WeeWxAuth.HEADER && station.headerName.isNullOrEmpty()) return "Enter a header name"
         if (station.auth != WeeWxAuth.NONE && secret.isEmpty() && !hasSavedSecret) return "Enter the ${secretLabel(station.auth).lowercase()}"
@@ -458,12 +506,78 @@ private fun StationEditor(
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
+                Text("Station location", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = latText,
+                        onValueChange = { latText = it.filter { c -> c.isDigit() || c == '.' || c == '-' }.take(12) },
+                        singleLine = true,
+                        label = { Text("Latitude") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                    OutlinedTextField(
+                        value = lonText,
+                        onValueChange = { lonText = it.filter { c -> c.isDigit() || c == '.' || c == '-' }.take(12) },
+                        singleLine = true,
+                        label = { Text("Longitude") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedButton(
+                        enabled = !locating,
+                        onClick = {
+                            locating = true
+                            scope.launch {
+                                val here = if (hasLocationPermission(context)) container.deviceLocation.current() else null
+                                if (here != null) {
+                                    latText = GeoPoint.format(here.latitude)
+                                    lonText = GeoPoint.format(here.longitude)
+                                } else {
+                                    problem = "Couldn't get your location. Allow location access, or copy a saved place."
+                                }
+                                locating = false
+                            }
+                        },
+                    ) { Text(if (locating) "Locating…" else "I'm at the station") }
+                    if (locations.isNotEmpty()) {
+                        var pick by remember { mutableStateOf(false) }
+                        Box {
+                            TextButton(onClick = { pick = true }) { Text("Copy a place") }
+                            DropdownMenu(expanded = pick, onDismissRequest = { pick = false }) {
+                                locations.forEach { place ->
+                                    DropdownMenuItem(
+                                        text = { Text(place.displayName) },
+                                        onClick = {
+                                            latText = GeoPoint.format(place.latitude)
+                                            lonText = GeoPoint.format(place.longitude)
+                                            pick = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 ChoiceDropdown(
-                    label = "Use for location",
-                    options = listOf<SavedLocation?>(null) + locations,
-                    selected = locations.firstOrNull { it.id == linked },
-                    optionLabel = { it?.name ?: "None (station not used)" },
-                    onSelect = { linked = it?.id },
+                    label = "Use for places within",
+                    options = WeeWxStation.RADIUS_CHOICES_KM,
+                    selected = radiusKm,
+                    optionLabel = { radiusLabel(it, units) },
+                    onSelect = { radiusKm = it },
+                )
+                val preview = build()
+                val covered = if (preview.hasPosition) locations.filter { preview.covers(it) } else emptyList()
+                Text(
+                    when {
+                        !preview.hasPosition -> "Set where the station is to choose which places it serves."
+                        covered.isEmpty() -> "No saved places are within this radius yet. Places you add nearby will use it automatically."
+                        else -> "Replaces current conditions for: " + covered.joinToString(", ") { it.displayName }
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 OutlinedTextField(
                     value = maxAge,
@@ -534,6 +648,157 @@ private fun StationEditor(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+private fun radiusLabel(km: Double, units: UnitFormatter): String =
+    if (units.system == UnitSystem.IMPERIAL) "${Units.kmToMiles(km).roundToInt().coerceAtLeast(1)} mi" else "${km.roundToInt()} km"
+
+private fun hasLocationPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
+/**
+ * Google Pollen API key, with what it costs. No NOAA/NWS product covers
+ * pollen, so this is the one source that needs the user's own billing account.
+ */
+@Composable
+private fun PollenSection(
+    state: MainUiState,
+    container: AppContainer,
+    onEnabledChange: (Boolean) -> Unit,
+    onKeyChanged: () -> Unit,
+) {
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var hasKey by remember { mutableStateOf(false) }
+    var newKey by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var testResult by remember { mutableStateOf<String?>(null) }
+    var testing by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { hasKey = withContext(Dispatchers.IO) { container.secrets.has(SecretStore.POLLEN_API_KEY) } }
+    val places = state.locations.size.coerceAtLeast(1)
+    val maxRequests = PollenPricing.maxMonthlyRequests(places)
+    val maxCost = PollenPricing.maxMonthlyCostUsd(places)
+    val sha1 = remember { AppSignature.displaySha1(context) }
+
+    SectionCard("Pollen (Google Pollen API)") {
+        Text(
+            "NOAA and the NWS don't forecast pollen, so Northvane uses Google's Pollen API: 5-day tree, grass and " +
+                "weed levels on a 1 km grid, plus the main plants (birch, oak, ragweed…). It needs your own API key.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = MaterialTheme.colorScheme.secondaryContainer,
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("What it costs", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                val lines = listOf(
+                    "Free for the first %,d requests each month.".format(PollenPricing.FREE_REQUESTS_PER_MONTH),
+                    "After that, US$%.0f per 1,000 requests (1¢ each).".format(PollenPricing.USD_PER_1000),
+                    "Northvane asks at most once every ${PollenPricing.MIN_REFRESH_HOURS} hours per saved place. With your " +
+                        "$places place${if (places == 1) "" else "s"}, that's at most %,d requests a month, ".format(maxRequests) +
+                        if (maxCost == 0.0) "so you'd pay $0." else "or up to about US$%.2f a month.".format(maxCost),
+                    "Google needs a billing account (a card on file) to issue any Maps Platform key, even if you never pass the free tier.",
+                    "Prices from Google's Maps Platform price list, checked ${PollenPricing.PRICE_CHECKED}. Google can change them.",
+                )
+                lines.forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer) }
+            }
+        }
+        Text(
+            "To get a key: in Google Cloud Console create a project, enable the \"Pollen API\", then create an API key under " +
+                "APIs & Services › Credentials. To be safe, restrict the key to the Pollen API and to this app, and set a " +
+                "daily quota (for example 200 requests) so it can never run up a bill.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (sha1 != null) {
+            SelectionContainer {
+                Text(
+                    "Android app restriction: package ${context.packageName}, SHA-1 $sha1",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        LabeledSwitch(title = "Show pollen forecast", checked = state.settings.pollenEnabled, onCheckedChange = onEnabledChange)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.Lock, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                if (hasKey) "API key saved (encrypted on this device)" else "No API key saved",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+        OutlinedTextField(
+            value = newKey,
+            onValueChange = {
+                newKey = it.trim().take(64)
+                error = null
+            },
+            singleLine = true,
+            label = { Text(if (hasKey) "Replace API key" else "API key") },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false),
+            isError = error != null,
+            supportingText = error?.let { { Text(it) } },
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            FilledTonalButton(
+                enabled = newKey.isNotEmpty(),
+                onClick = {
+                    if (!PollenClient.looksLikeApiKey(newKey)) {
+                        error = "That doesn't look like a Google API key (it usually starts with \"AIza\")."
+                    } else {
+                        val key = newKey
+                        scope.launch {
+                            withContext(Dispatchers.IO) { container.secrets.put(SecretStore.POLLEN_API_KEY, key) }
+                            container.settings.setPollen(true)
+                            newKey = ""
+                            hasKey = true
+                            onKeyChanged()
+                        }
+                    }
+                },
+            ) { Text("Save key") }
+            if (hasKey) {
+                OutlinedButton(
+                    enabled = !testing && state.selected != null,
+                    onClick = {
+                        val place = state.selected ?: return@OutlinedButton
+                        testing = true
+                        testResult = null
+                        scope.launch {
+                            val result = attempt {
+                                val key = withContext(Dispatchers.IO) { container.secrets.get(SecretStore.POLLEN_API_KEY) }
+                                    ?: throw IllegalStateException("No key saved")
+                                container.pollen.forecast(place.point, key, java.time.Instant.now(), AppSignature.restriction(context))
+                            }
+                            testResult = result.fold(
+                                onSuccess = { f ->
+                                    val worst = f.days.firstOrNull()?.worst
+                                    "✓ Key works. Today: " + (worst?.let { "${OutlookText.pollenCategory(it.index).lowercase()} ${it.name.lowercase()} pollen" } ?: "no pollen in season")
+                                },
+                                onFailure = { "✗ ${it.toUserMessage()}" },
+                            )
+                            testing = false
+                        }
+                    },
+                ) { Text(if (testing) "Testing…" else "Test") }
+                TextButton(onClick = {
+                    scope.launch {
+                        withContext(Dispatchers.IO) { container.secrets.remove(SecretStore.POLLEN_API_KEY) }
+                        hasKey = false
+                        testResult = null
+                        onKeyChanged()
+                    }
+                }) { Text("Remove") }
+            }
+        }
+        testResult?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+    }
 }
 
 private fun secretLabel(auth: WeeWxAuth) = when (auth) {

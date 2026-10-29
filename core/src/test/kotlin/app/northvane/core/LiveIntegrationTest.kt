@@ -87,4 +87,37 @@ class LiveIntegrationTest {
             assertTrue(response.body.take(8).contains("PNG"), "not a PNG: $url")
         }
     }
+
+    @Test
+    fun outlooksFromLiveNoaaHistory() = runBlocking {
+        val repo = WeatherRepository(
+            NwsClient(http, { "Northvane/test (integration tests)" }),
+            OwmClient(http),
+            WeeWxClient(HttpClients.localServerClients(http)),
+            cache,
+            acis = app.northvane.core.history.AcisClient(http),
+        )
+        // Portland, ME: the user's target region.
+        val snapshot = repo.fetch(SavedLocation("pwm", "Portland", 43.6591, -70.2568), SourceConfig(), FetchPlan.FULL)
+        val history = assertNotNull(snapshot.history, "ACIS history: ${snapshot.issues}")
+        println("history: ${history.days.size} days, elevation ${history.elevationM} m, snow ${history.snowDepthMm} mm at ${history.snowDepthStation}")
+        assertTrue(history.days.size >= 60)
+        println("mud: " + snapshot.daily.map { "${it.date}=${it.mud?.level}" })
+        println("foliage: ${snapshot.foliage?.today} peak ${snapshot.foliage?.estimatedPeak}")
+        println("hiking: " + snapshot.daily.map { d -> "${d.date}=${d.activities.first { it.activity == app.northvane.core.model.Activity.HIKING }.score}" })
+        assertTrue(snapshot.daily.all { it.mud != null && it.activities.isNotEmpty() })
+    }
+
+    @Test
+    fun satelliteImageryTile() = runBlocking {
+        val bbox = "-8237642,5009377,-7514065,5732953"
+        for (imagery in listOf(app.northvane.core.radar.SatelliteImagery.VISIBLE, app.northvane.core.radar.SatelliteImagery.INFRARED)) {
+            val url = app.northvane.core.radar.SatelliteImagery.tileUrl(imagery).replace("{bbox-epsg-3857}", bbox)
+            val bytes = http.newCall(Request.Builder().url(url).build()).execute().use { r ->
+                assertEquals(200, r.code, url)
+                r.body.bytes()
+            }
+            assertTrue(bytes.size > 1000 && bytes[1] == 'P'.code.toByte(), "PNG for $imagery")
+        }
+    }
 }

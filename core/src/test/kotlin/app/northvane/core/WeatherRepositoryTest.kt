@@ -7,6 +7,9 @@ import app.northvane.core.net.HttpClients
 import app.northvane.core.nws.NwsClient
 import app.northvane.core.owm.OwmClient
 import app.northvane.core.repo.CachedNwsPoint
+import app.northvane.core.history.AcisClient
+import app.northvane.core.pollen.PollenClient
+import app.northvane.core.pollen.PollenPricing
 import app.northvane.core.model.DetailSource
 import app.northvane.core.model.OutageLevel
 import app.northvane.core.model.Section
@@ -49,7 +52,7 @@ class WeatherRepositoryTest {
         on("/gridpoints/TOP/32,81", body = Nws.grid)
     }
 
-    private fun repo(fake: FakeNetwork, cache: NwsPointCache = MemoryCache()): WeatherRepository {
+    private fun repo(fake: FakeNetwork, cache: NwsPointCache = MemoryCache(), extras: Boolean = false): WeatherRepository {
         val base = HttpClients.create("test-agent", cacheDir = null).newBuilder().addInterceptor(fake).build()
         return WeatherRepository(
             nws = NwsClient(base, { "Northvane/test (tests)" }),
@@ -57,7 +60,77 @@ class WeatherRepositoryTest {
             weewx = WeeWxClient(HttpClients.localServerClients(base)),
             pointCache = cache,
             clock = { NOW },
+            acis = AcisClient(base).takeIf { extras },
+            pollen = PollenClient(base).takeIf { extras },
         )
+    }
+
+    private fun resource(name: String) = requireNotNull(javaClass.getResource(name)).readText()
+
+    @Test
+    fun historyAndPollenAreFetchedAndOutlooksAnnotated() = runTest {
+        val fake = FakeNetwork().apply {
+            nwsHappyPath()
+            on("data.rcc-acis.org/GridData", body = resource("/live/acis_grid_portland.json"))
+            on("data.rcc-acis.org/MultiStnData", body = resource("/live/acis_snwd_whites.json"))
+            on("pollen.googleapis.com/v1/forecast:lookup", body = resource("/pollen/google_forecast.json"))
+        }
+        val key = "AIzaSyA-test-key-0123456789abcdefghijk"
+        val snapshot = repo(fake, extras = true).fetch(kansas, SourceConfig(pollenApiKey = key), FetchPlan.FULL)
+        assertEquals(76, snapshot.history!!.days.size)
+        assertEquals(2, snapshot.pollen!!.days.size)
+        assertTrue(snapshot.daily.all { it.activities.isNotEmpty() && it.mud != null })
+        assertTrue(snapshot.issues.isEmpty(), "${snapshot.issues}")
+        val pollenRequest = fake.requests.single { it.url.host == "pollen.googleapis.com" }
+        assertEquals(key, pollenRequest.header("X-Goog-Api-Key"))
+        assertFalse(pollenRequest.url.toString().contains(key), "key must not be in the URL")
+        assertEquals("39.75", pollenRequest.url.queryParameter("location.latitude"))
+        assertTrue(fake.requests.single { it.url.encodedPath == "/GridData" }.method == "POST")
+    }
+
+    @Test
+    fun pollenNeedsKeyAndPlan() = runTest {
+        val fake = FakeNetwork().apply { nwsHappyPath() }
+        repo(fake, extras = true).fetch(kansas, SourceConfig(), FetchPlan.FULL)
+        assertTrue(fake.requests.none { it.url.host == "pollen.googleapis.com" })
+        val fake2 = FakeNetwork().apply { nwsHappyPath() }
+        repo(fake2, extras = true).fetch(kansas, SourceConfig(pollenApiKey = "AIzaSyA-test-key-0123456789abcdefghijk"), FetchPlan(Section.entries.toSet() - Section.POLLEN - Section.HISTORY))
+        assertTrue(fake2.requests.none { it.url.host == "pollen.googleapis.com" || it.url.host == "data.rcc-acis.org" })
+    }
+
+    @Test
+    fun pollenKeyErrorsAreExplained() = runTest {
+        val fake = FakeNetwork().apply {
+            nwsHappyPath()
+            on("pollen.googleapis.com", code = 400, body = """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}""")
+        }
+        val snapshot = repo(fake, extras = true).fetch(kansas, SourceConfig(pollenApiKey = "AIzaSyA-test-key-0123456789abcdefghijk"), FetchPlan.FULL)
+        assertNull(snapshot.pollen)
+        assertTrue(snapshot.issues.any { it.source == DataSource.GOOGLE_POLLEN && "rejected" in it.message }, "${snapshot.issues}")
+        // ACIS 404s here (no route): reported, but forecasts still work.
+        assertTrue(snapshot.daily.isNotEmpty())
+    }
+
+    @Test
+    fun pollenPricing() {
+        assertEquals(124, PollenPricing.maxMonthlyRequests(1))
+        assertEquals(0.0, PollenPricing.maxMonthlyCostUsd(5))
+        assertEquals(12.0, PollenPricing.maxMonthlyCostUsd(50), 1e-9)
+    }
+
+    @Test
+    fun parsesPollenForecast() {
+        val days = PollenClient.parse(resource("/pollen/google_forecast.json"))
+        val first = days.first()
+        assertEquals(java.time.LocalDate.parse("2027-05-12"), first.date)
+        assertEquals("TREE", first.worst!!.code)
+        assertEquals(4, first.worst!!.index)
+        assertNull(first.types.single { it.code == "WEED" }.index)
+        assertFalse(first.types.single { it.code == "WEED" }.inSeason)
+        assertEquals(listOf("Birch", "Oak", "Grasses"), first.topPlants.map { it.name })
+        assertTrue(first.tips.isNotEmpty())
+        assertTrue(PollenClient.looksLikeApiKey("AIzaSyA-test-key-0123456789abcdefghijk"))
+        assertFalse(PollenClient.looksLikeApiKey("short"))
     }
 
     @Test
@@ -107,7 +180,10 @@ class WeatherRepositoryTest {
         assertEquals(2, snapshot.daily.size)
         assertTrue(fake.requests.none { it.url.encodedPath.endsWith("/forecast/hourly") })
         assertTrue(fake.requests.none { it.url.encodedPath == "/gridpoints/TOP/32,81" })
-        assertEquals(setOf(Section.HOURLY_FORECAST, Section.FORECAST_DETAILS, Section.LOCAL_STATION, Section.OWM_FALLBACK), snapshot.skippedSections)
+        assertEquals(
+            setOf(Section.HOURLY_FORECAST, Section.FORECAST_DETAILS, Section.LOCAL_STATION, Section.OWM_FALLBACK, Section.HISTORY, Section.POLLEN),
+            snapshot.skippedSections,
+        )
         // Without grid data, numbers come from the forecast text (the fixture states winds).
         assertEquals(DetailSource.TEXT, snapshot.daily.first().detailSource)
     }
@@ -145,7 +221,7 @@ class WeatherRepositoryTest {
         }
         val station = WeeWxStation(
             id = "s1", name = "Backyard", url = "https://wx.example.com/northvane.json",
-            auth = WeeWxAuth.BASIC, username = "me", linkedLocationId = "home",
+            auth = WeeWxAuth.BASIC, username = "me", latitude = 39.78, longitude = -97.05, radiusKm = 8.0,
         )
         val snapshot = repo(fake).fetch(kansas, SourceConfig(station, WeeWxSecret("hunter2")), FetchPlan.FULL)
 
@@ -161,9 +237,24 @@ class WeatherRepositoryTest {
     }
 
     @Test
+    fun weewxCoversLocationsWithinRadius() {
+        val station = WeeWxStation(id = "s1", name = "Backyard", url = "https://wx.example.com/x.json", latitude = 39.78, longitude = -97.05)
+        assertTrue(station.covers(kansas)) // ~5 km away
+        assertFalse(station.copy(radiusKm = 2.0).covers(kansas))
+        assertFalse(station.covers(london))
+        // Legacy pairing still works until the station gets a position.
+        val legacy = WeeWxStation(id = "s2", name = "Old", url = "https://wx.example.com/y.json", linkedLocationId = "home")
+        assertTrue(legacy.covers(kansas))
+        assertFalse(legacy.covers(london))
+        val near = station.copy(id = "near", latitude = 39.746, longitude = -97.089, radiusKm = 25.0)
+        assertEquals("near", WeeWxStation.forLocation(listOf(station, near), kansas)!!.id)
+        assertNull(WeeWxStation.forLocation(listOf(station.copy(enabled = false)), kansas))
+    }
+
+    @Test
     fun weewxForOtherLocationIsIgnored() = runTest {
         val fake = FakeNetwork().apply { nwsHappyPath() }
-        val station = WeeWxStation(id = "s1", name = "Cabin", url = "https://wx.example.com/x.json", linkedLocationId = "cabin")
+        val station = WeeWxStation(id = "s1", name = "Cabin", url = "https://wx.example.com/x.json", latitude = 44.27, longitude = -71.3)
         val snapshot = repo(fake).fetch(kansas, SourceConfig(station), FetchPlan.FULL)
         assertEquals(DataSource.NWS, snapshot.current!!.source)
         assertTrue(fake.requests.none { it.url.host == "wx.example.com" })

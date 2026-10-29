@@ -26,6 +26,11 @@ class TimeFormat(private val zone: ZoneId, is24Hour: Boolean) {
         else -> date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
     }
 
+    /** Short weekday name, never "Today" (for compact day rows). */
+    fun weekday(date: LocalDate): String = date.dayOfWeek.getDisplayName(TextStyle.SHORT, locale)
+
+    fun monthDay(date: LocalDate): String = DateTimeFormatter.ofPattern("MMM d", locale).format(date)
+
     /** Shows the time with a day prefix only when it isn't today. */
     fun smart(instant: Instant): String =
         if (instant.atZone(zone).toLocalDate() == today()) time(instant) else dayTime(instant)

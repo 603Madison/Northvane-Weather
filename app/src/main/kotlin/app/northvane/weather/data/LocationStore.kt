@@ -39,7 +39,8 @@ class LocationStore(context: Context) {
     suspend fun upsertLocation(location: SavedLocation) = store.edit { p ->
         val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()
         val updated = if (current.any { it.id == location.id }) {
-            current.map { if (it.id == location.id) location else it }
+            // Refreshing a place (e.g. the device position) keeps the user's nickname and notification choice.
+            current.map { if (it.id == location.id) location.copy(nickname = location.nickname ?: it.nickname, notify = it.notify) else it }
         } else if (location.isDeviceLocation) {
             listOf(location) + current
         } else {
@@ -47,6 +48,17 @@ class LocationStore(context: Context) {
         }
         p[locationsKey] = NorthvaneJson.encodeToString(locationList, updated)
     }
+
+    /** Applies [change] to the saved location [id], if it exists. */
+    suspend fun updateLocation(id: String, change: (SavedLocation) -> SavedLocation) = store.edit { p ->
+        val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()
+        p[locationsKey] = NorthvaneJson.encodeToString(locationList, current.map { if (it.id == id) change(it) else it })
+    }
+
+    suspend fun setNickname(id: String, nickname: String?) =
+        updateLocation(id) { it.copy(nickname = nickname?.trim()?.take(40)?.takeIf { n -> n.isNotEmpty() }) }
+
+    suspend fun setNotify(id: String, enabled: Boolean) = updateLocation(id) { it.copy(notify = enabled) }
 
     suspend fun removeLocation(id: String) = store.edit { p ->
         val current = p[locationsKey]?.let { runCatching { NorthvaneJson.decodeFromString(locationList, it) }.getOrNull() }.orEmpty()

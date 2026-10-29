@@ -134,6 +134,7 @@ fun NorthvaneRoot(
                     onOpenAlerts = { navController.navigateToTab(Routes.ALERTS) },
                     onOpenLocations = { navController.navigate(Routes.LOCATIONS) },
                     onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+                    onOpenSources = { navController.navigate(Routes.SOURCES) },
                 )
             }
             composable(Routes.RADAR) {

@@ -8,6 +8,9 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,10 +27,16 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
@@ -73,6 +82,7 @@ fun LocationsScreen(state: MainUiState, vm: MainViewModel, container: AppContain
     val scope = rememberCoroutineScope()
     val focus = LocalFocusManager.current
     var query by rememberSaveable { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<SavedLocation?>(null) }
     var results by remember { mutableStateOf<List<PlaceResult>>(emptyList()) }
     var searching by remember { mutableStateOf(false) }
     var searchedOnce by remember { mutableStateOf(false) }
@@ -202,34 +212,34 @@ fun LocationsScreen(state: MainUiState, vm: MainViewModel, container: AppContain
                 }
             }
             items(state.locations, key = { it.id }) { location ->
-                ListItem(
-                    headlineContent = { Text(location.name) },
-                    supportingContent = {
-                        Text(
-                            if (location.isDeviceLocation) "Your location"
-                            else "${GeoPoint.format(location.latitude)}, ${GeoPoint.format(location.longitude)}",
-                        )
-                    },
-                    leadingContent = {
-                        RadioButton(selected = location.id == state.selected?.id, onClick = { vm.selectLocation(location.id) })
-                    },
-                    trailingContent = {
-                        IconButton(onClick = { pendingDelete = location }) {
-                            Icon(Icons.Filled.Delete, contentDescription = "Remove ${location.name}")
-                        }
-                    },
-                    colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
-                    modifier = Modifier.clickable { vm.selectLocation(location.id) },
+                SavedLocationRow(
+                    location = location,
+                    selected = location.id == state.selected?.id,
+                    onSelect = { vm.selectLocation(location.id) },
+                    onRename = { renaming = location },
+                    onToggleNotify = { vm.setLocationNotify(location.id, !location.notify) },
+                    onRemove = { pendingDelete = location },
                 )
             }
         }
     }
 
+    renaming?.let { location ->
+        RenameDialog(
+            location = location,
+            onDismiss = { renaming = null },
+            onSave = { nickname ->
+                vm.renameLocation(location.id, nickname)
+                renaming = null
+            },
+        )
+    }
+
     pendingDelete?.let { location ->
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
-            title = { Text("Remove ${location.name}?") },
-            text = { Text("Its cached weather and alert notifications will stop. Any WeeWX station linked to it will be unlinked.") },
+            title = { Text("Remove ${location.displayName}?") },
+            text = { Text("Its cached weather and alert notifications will stop.") },
             confirmButton = {
                 TextButton(onClick = {
                     vm.removeLocation(location.id)
@@ -239,4 +249,89 @@ fun LocationsScreen(state: MainUiState, vm: MainViewModel, container: AppContain
             dismissButton = { TextButton(onClick = { pendingDelete = null }) { Text("Cancel") } },
         )
     }
+}
+
+@Composable
+private fun SavedLocationRow(
+    location: SavedLocation,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onRename: () -> Unit,
+    onToggleNotify: () -> Unit,
+    onRemove: () -> Unit,
+) {
+    var menu by remember { mutableStateOf(false) }
+    val place = if (location.isDeviceLocation) "Your location" else "${GeoPoint.format(location.latitude)}, ${GeoPoint.format(location.longitude)}"
+    val details = buildList {
+        if (location.nickname != null) add(location.name)
+        add(place)
+        if (!location.notify) add("Alert notifications off")
+    }.distinct().joinToString(" · ")
+    ListItem(
+        headlineContent = { Text(location.displayName) },
+        supportingContent = { Text(details) },
+        leadingContent = { RadioButton(selected = selected, onClick = onSelect) },
+        trailingContent = {
+            Box {
+                IconButton(onClick = { menu = true }) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Options for ${location.displayName}")
+                }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                        onClick = { menu = false; onRename() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Alert notifications") },
+                        leadingIcon = { Icon(Icons.Filled.Notifications, contentDescription = null) },
+                        trailingIcon = { Checkbox(checked = location.notify, onCheckedChange = null) },
+                        onClick = { menu = false; onToggleNotify() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Remove") },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        onClick = { menu = false; onRemove() },
+                    )
+                }
+            }
+        },
+        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.clickable(onClick = onSelect),
+    )
+}
+
+@Composable
+private fun RenameDialog(location: SavedLocation, onDismiss: () -> Unit, onSave: (String?) -> Unit) {
+    var text by rememberSaveable(location.id) { mutableStateOf(location.nickname ?: location.name) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Rename location") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = text,
+                    onValueChange = { text = it.take(40) },
+                    label = { Text("Nickname") },
+                    placeholder = { Text("e.g. Home, Cabin, Mom's") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onSave(text) }),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "Place: ${location.name}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { onSave(text.takeIf { it.trim() != location.name }) }) { Text("Save") } },
+        dismissButton = {
+            Row {
+                if (location.nickname != null) TextButton(onClick = { onSave(null) }) { Text("Reset") }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
+        },
+    )
 }

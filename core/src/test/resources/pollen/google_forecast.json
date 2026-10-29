@@ -1,0 +1,41 @@
+{
+  "regionCode": "us",
+  "dailyInfo": [
+    {
+      "date": { "year": 2027, "month": 5, "day": 12 },
+      "pollenTypeInfo": [
+        {
+          "code": "GRASS",
+          "displayName": "Grass",
+          "inSeason": true,
+          "indexInfo": { "code": "UPI", "displayName": "Universal Pollen Index", "value": 1, "category": "Very Low", "indexDescription": "People with very high allergy to pollen are likely to experience symptoms", "color": { "green": 0.61960787, "blue": 0.23529412 } },
+          "healthRecommendations": ["It's a good day for outdoor activities since pollen levels are very low."]
+        },
+        {
+          "code": "TREE",
+          "displayName": "Tree",
+          "inSeason": true,
+          "indexInfo": { "code": "UPI", "displayName": "Universal Pollen Index", "value": 4, "category": "High", "indexDescription": "People with moderate allergy to pollen are likely to experience symptoms", "color": { "red": 1, "green": 0.54509807 } },
+          "healthRecommendations": ["Consider limiting your outdoor activities.", "Keep windows closed and wear sunglasses outdoors."]
+        },
+        { "code": "WEED", "displayName": "Weed", "inSeason": false }
+      ],
+      "plantInfo": [
+        { "code": "BIRCH", "displayName": "Birch", "inSeason": true, "indexInfo": { "code": "UPI", "value": 4, "category": "High" } },
+        { "code": "OAK", "displayName": "Oak", "inSeason": true, "indexInfo": { "code": "UPI", "value": 3, "category": "Moderate" } },
+        { "code": "MAPLE", "displayName": "Maple", "inSeason": true, "indexInfo": { "code": "UPI", "value": 0, "category": "None" } },
+        { "code": "RAGWEED", "displayName": "Ragweed", "inSeason": false },
+        { "code": "GRAMINALES", "displayName": "Grasses", "inSeason": true, "indexInfo": { "code": "UPI", "value": 1, "category": "Very Low" } }
+      ]
+    },
+    {
+      "date": { "year": 2027, "month": 5, "day": 13 },
+      "pollenTypeInfo": [
+        { "code": "GRASS", "displayName": "Grass", "inSeason": true, "indexInfo": { "code": "UPI", "value": 1, "category": "Very Low" } },
+        { "code": "TREE", "displayName": "Tree", "inSeason": true, "indexInfo": { "code": "UPI", "value": 2, "category": "Low" } },
+        { "code": "WEED", "displayName": "Weed", "inSeason": false }
+      ]
+    }
+  ],
+  "nextPageToken": "ChYKEgm0n4LhjI5FQBGbHdMVhdlRwBACEAIaGAoUCgYI5g8QBRgMEgYI5g8QBRgQGAI="
+}

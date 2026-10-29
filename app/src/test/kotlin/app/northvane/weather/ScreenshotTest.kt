@@ -21,7 +21,17 @@ import app.northvane.core.nws.ForecastDetails
 import app.northvane.core.nws.NwsClient
 import app.northvane.core.nws.NwsGridData
 import app.northvane.core.nws.NwsParsers
-import app.northvane.core.outage.OutageEstimator
+import app.northvane.core.history.AcisClient
+import app.northvane.core.model.AlertCategory
+import app.northvane.core.model.PollenForecast
+import app.northvane.core.model.WeatherHistory
+import app.northvane.core.outlook.Outlooks
+import app.northvane.core.outlook.Periods
+import app.northvane.core.pollen.PollenClient
+import app.northvane.weather.ui.MainViewModel
+import app.northvane.weather.ui.locations.LocationsScreen
+import app.northvane.weather.ui.settings.DataSourcesScreen
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import app.northvane.core.util.Solar
 import app.northvane.weather.data.AppSettings
 import app.northvane.weather.data.DataSaverMode
@@ -73,13 +83,21 @@ class ScreenshotTest {
             placeName = point.placeName,
             current = NwsParsers.parseObservation(resource("me_obs.json"), null),
             hourly = ForecastDetails.enrichHourly(NwsParsers.parseHourly(resource("me_hourly.json")), grid),
-            daily = OutageEstimator.annotate(daily, emptyList(), zone),
+            daily = Periods.fill(daily, emptyList(), grid, zone),
             alerts = emptyList(),
             forecastSource = DataSource.NWS,
             radarStation = point.radarStation,
             sunrise = sunrise,
             sunset = sunset,
-        )
+            history = WeatherHistory(AcisClient.parseGrid(resource("me_acis.json")).first, elevationM = 20.0, fetchedAt = now),
+            pollen = pollen(now.atZone(zone).toLocalDate()),
+        ).let { Outlooks.annotate(it, location.latitude, location.longitude, now) }
+    }
+
+    /** Captured Google Pollen API response, moved to today's dates. */
+    private fun pollen(today: java.time.LocalDate): PollenForecast {
+        val days = PollenClient.parse(resource("pollen.json"))
+        return PollenForecast(days.mapIndexed { i, d -> d.copy(date = today.plusDays(i.toLong())) }, Instant.now())
     }
 
     /** Demo only: turns the third day into a late-October nor'easter to show the outage outlook. */
@@ -90,22 +108,23 @@ class ScreenshotTest {
             gustMaxKph = Units.mphToKph(55.0), windMaxKph = Units.mphToKph(30.0), windDirectionDeg = 45.0,
             precipitationMm = Units.inchesToMm(1.8), precipitationChance = 100, thunderChance = 0,
         )
-        return s.copy(daily = OutageEstimator.annotate(days, s.alerts, zone))
+        return Outlooks.annotate(s.copy(daily = days.map { it.copy(daytime = null, overnight = null) }), location.latitude, location.longitude)
     }
 
     private fun state(
         snapshot: WeatherSnapshot? = snapshot(),
-        settings: AppSettings = AppSettings(units = UnitSystem.IMPERIAL),
+        settings: AppSettings = AppSettings(units = UnitSystem.IMPERIAL, pollenEnabled = true),
         network: NetworkStatus = NetworkStatus(),
         liteMode: Boolean = false,
     ) = MainUiState(
         ready = true,
-        locations = listOf(location, SavedLocation("nh", "Concord, NH", 43.2081, -71.5376)),
+        locations = listOf(location, SavedLocation("nh", "Concord, NH", 43.2081, -71.5376, nickname = "Mom's", notify = false)),
         selected = location,
         snapshot = snapshot,
         settings = settings.copy(notificationPromptShown = true),
         network = network,
         liteMode = liteMode,
+        pollenKeySet = settings.pollenEnabled,
     )
 
     private val noActions = HomeActions({}, {}, {}, {}, {}, {})
@@ -123,21 +142,73 @@ class ScreenshotTest {
     }
 
     @Test
-    @Config(qualifiers = "w400dp-h2400dp-xxhdpi")
+    @Config(qualifiers = "w400dp-h4600dp-xxhdpi")
     fun todayFullLight() {
         render(dark = false) { HomeScreen(state(), noActions, {}, {}, {}) }
         save("today_full_light")
-        compose.onAllNodesWithText("Wind")[0].performClick()
-        save("today_full_light_wind")
+        compose.onAllNodesWithText("Hiking")[0].performClick()
+        save("today_full_light_hiking_open")
     }
 
     @Test
-    @Config(qualifiers = "w400dp-h2400dp-xxhdpi")
+    @Config(qualifiers = "w400dp-h1400dp-xxhdpi")
+    fun warningTurnsTodayRed() {
+        val base = snapshot()
+        val warning = NwsParsers.parseAlerts(resource("nws_alerts_tx.json")).first().copy(
+            event = "High Wind Warning", category = AlertCategory.WARNING,
+            ends = Instant.now().plusSeconds(6 * 3600), expires = Instant.now().plusSeconds(6 * 3600),
+        )
+        render(dark = false) { HomeScreen(state(base.copy(alerts = listOf(warning))), noActions, {}, {}, {}) }
+        save("today_warning_light")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h1400dp-xxhdpi")
+    fun warningTurnsTodayRedDark() {
+        val base = snapshot()
+        val warning = NwsParsers.parseAlerts(resource("nws_alerts_tx.json")).first().copy(
+            event = "Winter Storm Warning", category = AlertCategory.WARNING,
+            ends = Instant.now().plusSeconds(6 * 3600), expires = Instant.now().plusSeconds(6 * 3600),
+        )
+        render(dark = true) { HomeScreen(state(base.copy(alerts = listOf(warning))), noActions, {}, {}, {}) }
+        save("today_warning_dark")
+    }
+
+    @Test
+    fun watchStaysNormal() {
+        val base = snapshot()
+        val watch = NwsParsers.parseAlerts(resource("nws_alerts_tx.json")).first().copy(
+            event = "Winter Storm Watch", category = AlertCategory.WATCH,
+            ends = Instant.now().plusSeconds(6 * 3600), expires = Instant.now().plusSeconds(6 * 3600),
+        )
+        render(dark = false) { HomeScreen(state(base.copy(alerts = listOf(watch))), noActions, {}, {}, {}) }
+        save("today_watch_light")
+    }
+
+    @Test
+    fun locationsWithNicknames() {
+        val container = AppContainer(ApplicationProvider.getApplicationContext())
+        val vm = MainViewModel(container)
+        render(dark = false) { LocationsScreen(state(), vm, container, onBack = {}) }
+        compose.onAllNodesWithContentDescription("Options for Mom's")[0].performClick()
+        save("locations_menu")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h3200dp-xxhdpi")
+    fun dataSourcesPollen() {
+        val container = AppContainer(ApplicationProvider.getApplicationContext())
+        render(dark = false) { DataSourcesScreen(state(), container, onBack = {}, onSourcesChanged = {}) }
+        save("data_sources")
+    }
+
+    @Test
+    @Config(qualifiers = "w400dp-h3400dp-xxhdpi")
     fun noreasterOutageDark() {
         val storm = withNorEaster(snapshot())
         render(dark = true) { HomeScreen(state(storm), noActions, {}, {}, {}) }
         val name = java.time.format.TextStyle.SHORT.let { storm.daily[2].date.dayOfWeek.getDisplayName(it, java.util.Locale.getDefault()) }
-        compose.onNodeWithText(name).performClick()
+        compose.onAllNodesWithText(name)[0].performClick()
         save("today_noreaster_dark")
     }
 
@@ -190,7 +261,7 @@ class ScreenshotTest {
     }
 
     @Test
-    @Config(qualifiers = "w400dp-h3000dp-xxhdpi")
+    @Config(qualifiers = "w400dp-h4200dp-xxhdpi")
     fun settingsLight() {
         val container = AppContainer(ApplicationProvider.getApplicationContext())
         render(dark = false) { SettingsScreen(state(), container, onBack = {}, onOpenSources = {}) }

@@ -89,6 +89,7 @@ class SecretStore(context: Context) {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
 
         const val OWM_API_KEY = "owm_api_key"
+        const val POLLEN_API_KEY = "google_pollen_api_key"
         fun weewxSecret(stationId: String) = "weewx_secret_$stationId"
     }
 }

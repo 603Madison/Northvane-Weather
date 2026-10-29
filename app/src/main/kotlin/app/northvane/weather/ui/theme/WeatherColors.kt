@@ -25,6 +25,10 @@ fun skyGradient(condition: WeatherCondition, isDay: Boolean, dark: Boolean): Lis
     return if (dark) colors.map { it.copy(red = it.red * 0.62f, green = it.green * 0.64f, blue = it.blue * 0.72f) } else colors
 }
 
+/** Hero card background while a warning is in effect. */
+fun warningGradient(dark: Boolean): List<Color> =
+    if (dark) listOf(Color(0xFF5E1212), Color(0xFF8E2424)) else listOf(Color(0xFFA51D1D), Color(0xFFE04B4B))
+
 fun alertColor(category: AlertCategory): Color = when (category) {
     AlertCategory.WARNING -> Color(0xFFD32F2F)
     AlertCategory.WATCH -> Color(0xFFEF6C00)

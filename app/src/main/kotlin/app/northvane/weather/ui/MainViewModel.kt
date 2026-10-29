@@ -13,6 +13,7 @@ import app.northvane.core.util.Solar
 import app.northvane.weather.AppContainer
 import app.northvane.weather.data.AppSettings
 import app.northvane.weather.data.LocationStore
+import app.northvane.weather.data.SecretStore
 import app.northvane.weather.net.NetworkStatus
 import app.northvane.weather.net.isLimited
 import kotlinx.coroutines.flow.first
@@ -42,6 +43,8 @@ data class MainUiState(
     val settings: AppSettings = AppSettings(),
     val network: NetworkStatus = NetworkStatus(),
     val liteMode: Boolean = false,
+    /** Whether a Google Pollen API key is saved (the key itself never leaves the secret store). */
+    val pollenKeySet: Boolean = false,
 )
 
 /** Activity-scoped state shared by the Today, Radar and Alerts tabs. */
@@ -71,6 +74,7 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             settings = settings,
             network = network,
             liteMode = isLimited(settings, network),
+            pollenKeySet = settings.pollenEnabled && container.secrets.has(SecretStore.POLLEN_API_KEY),
         )
     }.stateIn(viewModelScope, SharingStarted.Eagerly, MainUiState())
 
@@ -175,6 +179,14 @@ class MainViewModel(private val container: AppContainer) : ViewModel() {
             container.weatherCache.delete(id)
             snapshots.update { it - id }
         }
+    }
+
+    fun renameLocation(id: String, nickname: String?) {
+        viewModelScope.launch { container.locations.setNickname(id, nickname) }
+    }
+
+    fun setLocationNotify(id: String, enabled: Boolean) {
+        viewModelScope.launch { container.locations.setNotify(id, enabled) }
     }
 
     fun dismissError() {

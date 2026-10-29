@@ -11,6 +11,12 @@ import app.northvane.core.model.SourceIssue
 import app.northvane.core.model.WeatherAlert
 import app.northvane.core.model.WeatherCondition
 import app.northvane.core.model.WeatherSnapshot
+import app.northvane.core.history.AcisClient
+import app.northvane.core.history.HistoryUnavailableException
+import app.northvane.core.outlook.Outlooks
+import app.northvane.core.outlook.Periods
+import app.northvane.core.pollen.AndroidKeyRestriction
+import app.northvane.core.pollen.PollenClient
 import app.northvane.core.net.OutsideNwsCoverageException
 import app.northvane.core.net.WeatherApiException
 import app.northvane.core.net.toUserMessage
@@ -18,7 +24,6 @@ import app.northvane.core.nws.NwsClient
 import app.northvane.core.nws.NwsPoint
 import app.northvane.core.nws.NwsStation
 import app.northvane.core.nws.ForecastDetails
-import app.northvane.core.outage.OutageEstimator
 import app.northvane.core.owm.OwmClient
 import app.northvane.core.owm.OwmForecast
 import app.northvane.core.util.Solar
@@ -60,6 +65,9 @@ data class SourceConfig(
     val owmApiKey: String? = null,
     /** Set when the platform won't let us reach the station (e.g. local network permission denied). */
     val weewxBlockedReason: String? = null,
+    /** Null unless the user enabled pollen and entered a Google Pollen API key. */
+    val pollenApiKey: String? = null,
+    val pollenRestriction: AndroidKeyRestriction? = null,
 )
 
 @Serializable
@@ -80,6 +88,8 @@ class WeatherRepository(
     private val weewx: WeeWxClient,
     private val pointCache: NwsPointCache,
     private val clock: () -> Instant = Instant::now,
+    private val acis: AcisClient? = null,
+    private val pollen: PollenClient? = null,
 ) {
     suspend fun alerts(point: GeoPoint): List<WeatherAlert> = nws.alerts(point.rounded())
 
@@ -98,7 +108,7 @@ class WeatherRepository(
         nwsMeta.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, it.toUserMessage()) }
         val zone = meta?.let { NwsClient.zoneOf(it.point) }
 
-        val linkedStation = config.weewxStation?.takeIf { it.enabled && it.linkedLocationId == location.id && wants(Section.LOCAL_STATION) }
+        val linkedStation = config.weewxStation?.takeIf { it.enabled && it.covers(location) && wants(Section.LOCAL_STATION) }
         if (linkedStation != null && config.weewxBlockedReason != null) {
             issues += SourceIssue(DataSource.WEEWX, config.weewxBlockedReason)
         }
@@ -112,6 +122,15 @@ class WeatherRepository(
         val gridJob = meta?.takeIf { wants(Section.FORECAST_DETAILS) }?.let { m -> async { attempt { nws.gridData(m.point) } } }
         val observationJob = meta?.takeIf { wants(Section.CURRENT_CONDITIONS) }?.let { m ->
             async { attempt { latestObservation(m, plan.observationStations, now) } }
+        }
+        val today = now.atZone(zone ?: ZoneId.systemDefault()).toLocalDate()
+        val historyJob = acis?.takeIf { wants(Section.HISTORY) }?.let { client ->
+            // Late winter to spring needs the whole winter's freeze for the thaw model.
+            val days = if (today.monthValue in 2..5) 150 else AcisClient.DEFAULT_DAYS + 15
+            async { attempt { client.history(point, today, days, includeSnowDepth = today.monthValue !in 6..9, now = now) } }
+        }
+        val pollenJob = config.pollenApiKey?.takeIf { wants(Section.POLLEN) }?.let { key ->
+            pollen?.let { client -> async { attempt { client.forecast(point, key, now, config.pollenRestriction) } } }
         }
 
         val weewxResult = weewxJob?.await()
@@ -127,13 +146,18 @@ class WeatherRepository(
         hourlyResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Hourly: ${it.toUserMessage()}") }
         gridResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Forecast details: ${it.toUserMessage()}") }
         observationResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.NWS, "Observations: ${it.toUserMessage()}") }
+        val historyResult = historyJob?.await()
+        val pollenResult = pollenJob?.await()
+        historyResult?.exceptionOrNull()?.takeUnless { it is HistoryUnavailableException }
+            ?.let { issues += SourceIssue(DataSource.NOAA_ACIS, "Recent weather: ${it.toUserMessage()}") }
+        pollenResult?.exceptionOrNull()?.let { issues += SourceIssue(DataSource.GOOGLE_POLLEN, "Pollen: ${it.toUserMessage()}") }
 
         val grid = gridResult?.getOrNull()
         var daily: List<DailyForecast> = dailyResult?.getOrNull().orEmpty()
         var hourly: List<HourlyForecast> = hourlyResult?.getOrNull().orEmpty()
         if (grid != null && zone != null) {
             hourly = ForecastDetails.enrichHourly(hourly, grid)
-            daily = ForecastDetails.enrichDaily(daily, grid, zone)
+            daily = Periods.fill(ForecastDetails.enrichDaily(daily, grid, zone), hourly, grid, zone)
         }
         daily = ForecastDetails.enrichFromText(daily)
         var forecastSource: DataSource? = if (daily.isNotEmpty() || hourly.isNotEmpty()) DataSource.NWS else null
@@ -183,23 +207,20 @@ class WeatherRepository(
         val alerts = alertsResult?.getOrNull().orEmpty()
         val skipped = Section.entries.filterNot(wants).toSet()
 
-        val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK).isNotEmpty()
-        if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true) {
+        val attemptedSomething = (Section.entries.toSet() - skipped - Section.OWM_FALLBACK - Section.HISTORY - Section.POLLEN).isNotEmpty()
+        val gotExtras = historyResult?.isSuccess == true || pollenResult?.isSuccess == true
+        if (attemptedSomething && current == null && daily.isEmpty() && upcomingHourly.isEmpty() && alertsResult?.isSuccess != true && !gotExtras) {
             throw WeatherUnavailableException(issues.ifEmpty { listOf(SourceIssue(DataSource.NWS, "No data available")) })
         }
 
-        WeatherSnapshot(
+        val snapshot = WeatherSnapshot(
             locationId = location.id,
             fetchedAt = now,
             timeZoneId = resolvedZone.id,
             placeName = meta?.point?.placeName ?: owmForecast?.cityName,
             current = current,
             hourly = upcomingHourly.take(48),
-            daily = OutageEstimator.annotate(
-                daily.filter { !it.date.isBefore(now.atZone(resolvedZone).toLocalDate().minusDays(1)) },
-                alerts,
-                resolvedZone,
-            ),
+            daily = daily.filter { !it.date.isBefore(now.atZone(resolvedZone).toLocalDate().minusDays(1)) },
             alerts = alerts,
             alertsAvailable = meta != null || !outsideNws,
             forecastSource = forecastSource,
@@ -209,7 +230,10 @@ class WeatherRepository(
             sunrise = sunrise,
             sunset = sunset,
             skippedSections = skipped,
+            history = historyResult?.getOrNull(),
+            pollen = pollenResult?.getOrNull(),
         )
+        Outlooks.annotate(snapshot, location.latitude, location.longitude, now)
     }
 
     /**

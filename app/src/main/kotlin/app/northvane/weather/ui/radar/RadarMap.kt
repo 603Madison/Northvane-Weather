@@ -22,17 +22,28 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.RasterLayer
 import org.maplibre.android.style.layers.SymbolLayer
+import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.RasterSource
 import org.maplibre.android.style.sources.TileSet
+import org.maplibre.geojson.Feature
+import org.maplibre.geojson.Point
 
 // Free, keyless vector basemaps (OpenStreetMap data) — no Google/Mapbox key needed.
 private const val LIGHT_STYLE = "https://tiles.openfreemap.org/styles/positron"
 private const val DARK_STYLE = "https://tiles.openfreemap.org/styles/dark"
 private const val RADAR_OPACITY = 0.78f
 private const val DEFAULT_ZOOM = 6.5
+private const val SATELLITE_OPACITY = 0.85f
+private const val SAT_SOURCE = "satellite-src"
+private const val SAT_LAYER = "satellite-layer"
+private const val PIN_SOURCE = "pin-src"
+private const val PIN_HALO = "pin-halo"
+private const val PIN_DOT = "pin-dot"
+private const val PIN_COLOR = "#2563EB"
 
 /**
  * MapLibre map with one raster layer per radar frame. All frames load up front
@@ -45,6 +56,10 @@ fun RadarMap(
     index: Int,
     dark: Boolean,
     modifier: Modifier = Modifier,
+    /** Marker for the selected location. */
+    pin: GeoPoint? = null,
+    /** GOES satellite tiles drawn beneath the radar, or null for none. */
+    satelliteTiles: String? = null,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -124,6 +139,48 @@ fun RadarMap(
             if (labelLayer != null) s.addLayerBelow(layer, labelLayer) else s.addLayer(layer)
             layerId
         }
+    }
+
+    // Satellite imagery: under the radar and the place labels, over the basemap.
+    LaunchedEffect(style, satelliteTiles) {
+        val s = style ?: return@LaunchedEffect
+        s.removeLayer(SAT_LAYER)
+        s.removeSource(SAT_SOURCE)
+        val url = satelliteTiles ?: return@LaunchedEffect
+        val tiles = TileSet("2.2.0", url)
+        tiles.setMinZoom(0f)
+        tiles.setMaxZoom(10f)
+        s.addSource(RasterSource(SAT_SOURCE, tiles, 256))
+        val layer = RasterLayer(SAT_LAYER, SAT_SOURCE).withProperties(
+            PropertyFactory.rasterOpacity(SATELLITE_OPACITY),
+            PropertyFactory.rasterFadeDuration(0f),
+        )
+        val below = s.layers.firstOrNull { it.id.startsWith("radar-layer-") }?.id ?: s.layers.firstOrNull { it is SymbolLayer }?.id
+        if (below != null) s.addLayerBelow(layer, below) else s.addLayer(layer)
+    }
+
+    // Location pin, always on top.
+    LaunchedEffect(style, pin) {
+        val s = style ?: return@LaunchedEffect
+        listOf(PIN_DOT, PIN_HALO).forEach { s.removeLayer(it) }
+        s.removeSource(PIN_SOURCE)
+        val p = pin ?: return@LaunchedEffect
+        s.addSource(GeoJsonSource(PIN_SOURCE, Feature.fromGeometry(Point.fromLngLat(p.longitude, p.latitude))))
+        s.addLayer(
+            CircleLayer(PIN_HALO, PIN_SOURCE).withProperties(
+                PropertyFactory.circleRadius(15f),
+                PropertyFactory.circleColor(PIN_COLOR),
+                PropertyFactory.circleOpacity(0.22f),
+            ),
+        )
+        s.addLayer(
+            CircleLayer(PIN_DOT, PIN_SOURCE).withProperties(
+                PropertyFactory.circleRadius(7f),
+                PropertyFactory.circleColor(PIN_COLOR),
+                PropertyFactory.circleStrokeColor("#FFFFFF"),
+                PropertyFactory.circleStrokeWidth(2.5f),
+            ),
+        )
     }
 
     LaunchedEffect(style, layerIds, index) {

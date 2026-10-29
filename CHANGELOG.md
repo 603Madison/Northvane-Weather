@@ -3,6 +3,23 @@
 All notable changes to Northvane. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## [1.1.0] - 2026-10-29
+
+### Added
+- **Outdoor outlook**: daily 0–100 scores with reasons and recommendations for hiking, camping (overnight), off-roading, mountain biking, paddling and stargazing (cloud cover and moon phase). Choose which activities to show.
+- **Trail mud** level from a water-balance model over observed NOAA (ACIS) rain and temperatures, including spring thaw / mud season, snowmelt and frozen ground.
+- **Fall foliage** estimate: color stage, estimated peak, this year's shift from observed temperatures, and leaf-stripping wind/rain days.
+- **Pollen** forecast from the Google Pollen API with your own key, with the cost explained in Settings (5,000 free requests/month; at most one request per place every 6 hours).
+- **Satellite imagery** on the radar map (GOES visible/infrared/water vapor from NOAA nowCOAST) and a pin for the selected location.
+- **Location nicknames** and **per-location alert notifications**.
+- The Today screen turns **red while an NWS warning is in effect** (watches, advisories and statements unchanged).
+- Satellite settings for recent weather history, pollen and satellite imagery.
+
+### Changed
+- The hourly forecast is one tall card with every value (feels-like, precipitation chance and amount, wind, gusts, humidity, dew point, clouds) instead of switchable chips.
+- WeeWX stations now have a position and radius and serve every saved place within it, instead of being paired with one location (existing pairings keep working until edited).
+- The power outage outlook is season-aware: leaf cover follows estimated leaf-out and fall foliage for the location, frozen ground lowers uprooting risk and thawing ground raises it.
+
 ## [1.0.0] - 2026-10-29
 
 First release.

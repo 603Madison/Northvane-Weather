@@ -177,4 +177,13 @@ class AlertsAndRadarTest {
         assertEquals(100.0, Units.cToF(Units.feelsLikeC(Units.fToC(90.0), 60.0, 5.0)), 1.5)
         assertEquals(50.0, Units.humidityPercent(20.0, Units.dewpointC(20.0, 50.0)!!), 0.01)
     }
+
+    @Test
+    fun satelliteImageryTiles() {
+        assertEquals(app.northvane.core.radar.SatelliteImagery.VISIBLE, app.northvane.core.radar.SatelliteImagery.resolve(app.northvane.core.radar.SatelliteImagery.AUTO, daylight = true))
+        assertEquals(app.northvane.core.radar.SatelliteImagery.INFRARED, app.northvane.core.radar.SatelliteImagery.resolve(app.northvane.core.radar.SatelliteImagery.AUTO, daylight = false))
+        val url = app.northvane.core.radar.SatelliteImagery.tileUrl(app.northvane.core.radar.SatelliteImagery.INFRARED)
+        assertTrue(url.startsWith("https://nowcoast.noaa.gov/geoserver/satellite/wms?"))
+        assertTrue("layers=goes_longwave_imagery" in url && "{bbox-epsg-3857}" in url && "crs=EPSG:3857" in url)
+    }
 }
