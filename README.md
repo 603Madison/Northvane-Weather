@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/603Madison/Northvane-Weather/actions/workflows/ci.yml/badge.svg)](https://github.com/603Madison/Northvane-Weather/actions/workflows/ci.yml)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/603Madison/Northvane-Weather?label=download)](https://github.com/603Madison/Northvane-Weather/releases/latest)
 
 A clean, private weather app for Android.
 
@@ -59,7 +60,8 @@ built into the app, and there are no accounts, ads or analytics.
 
 ## Install
 
-Download the latest APK from [Releases](https://github.com/603Madison/Northvane-Weather/releases),
+**[Download the latest APK](https://github.com/603Madison/Northvane-Weather/releases/latest)**
+(older versions are under [all releases](https://github.com/603Madison/Northvane-Weather/releases)),
 check it against `SHA256SUMS.txt`, and open it on your phone (you'll be asked to
 allow installs from your browser or file manager). Northvane runs on Android 8.0+.
 The satellite features need Android 16+ and a carrier that supports satellite data.

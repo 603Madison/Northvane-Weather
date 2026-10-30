@@ -29,7 +29,15 @@ Without these, tagged releases still work but are attached as clearly named debu
    git tag v1.0.1
    git push origin main v1.0.1
    ```
-4. The **Release** workflow runs the tests, builds the APK, writes `SHA256SUMS.txt` and publishes the release. Tags containing a hyphen (for example `v1.1.0-beta.1`) are marked as pre-releases.
+4. The **Release** workflow runs the tests, builds the APK, writes `SHA256SUMS.txt` and publishes the release. Tags containing a hyphen (for example `v1.1.0-beta.1`) are marked as pre-releases. Only the highest version is marked Latest, which is what the README's download link points to.
+
+## Releasing an existing tag
+
+GitHub doesn't start workflows for tags when more than three are pushed at once. To release a tag that has no release yet, open **Actions › Release › Run workflow**, enter the tag (for example `v1.4.1`) and run it, or from a terminal:
+
+```bash
+gh workflow run release.yml -f tag=v1.4.1
+```
 
 ## Verifying a download
 
