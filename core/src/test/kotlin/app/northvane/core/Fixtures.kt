@@ -18,7 +18,8 @@ class FakeNetwork : Interceptor {
     data class Canned(val code: Int, val body: String, val headers: Map<String, String> = emptyMap())
 
     private val routes = mutableListOf<Pair<String, Canned>>()
-    val requests = mutableListOf<okhttp3.Request>()
+    // OkHttp calls run in parallel, so recording must be thread-safe.
+    val requests: MutableList<okhttp3.Request> = java.util.concurrent.CopyOnWriteArrayList()
 
     fun on(urlContains: String, code: Int = 200, body: String, headers: Map<String, String> = emptyMap()) {
         routes += urlContains to Canned(code, body, headers)
